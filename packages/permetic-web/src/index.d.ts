@@ -251,6 +251,14 @@ export interface WriteOp {
   body?: Record<string, unknown>;
   /** Digests referenced by this revision. Native maintains refcounts. */
   attachmentDigests?: readonly string[];
+  /**
+   * The document's winning rev when the JS-side merge that produced [tree] was
+   * computed, or omitted if the caller believed the document didn't exist yet.
+   * bulkWrite rejects (per-op, not batch-wide) an op whose current winning rev has
+   * since moved on from this - a lost race between two concurrent writers to the
+   * same id, rather than the second writer's merge silently overwriting the first's.
+   */
+  expectedPrevWinningRev?: string;
 }
 
 export interface WriteResult {
@@ -306,8 +314,15 @@ export interface StorageCapability {
   /** Read phase of _bulkDocs. One crossing for the whole batch. */
   getRevTrees(db: string, ids: readonly string[]): Promise<RevTreeEntry[]>;
 
-  /** Write phase of _bulkDocs. One crossing, one native transaction. */
-  bulkWrite(db: string, ops: readonly WriteOp[]): Promise<WriteResult[]>;
+  /**
+   * Write phase of _bulkDocs. One crossing: ops whose WriteOp.expectedPrevWinningRev
+   * still matches the document's current winning rev commit together, as one atomic
+   * transaction. Any op that's gone stale (a concurrent writer got there first) is
+   * skipped and reported as null at that position - positionally aligned with [ops]
+   * - rather than failing the whole call. Matches CouchDB's own per-doc
+   * partial-failure _bulkDocs semantics.
+   */
+  bulkWrite(db: string, ops: readonly WriteOp[]): Promise<Array<WriteResult | null>>;
 
   allDocs(db: string, options: AllDocsOptions): Promise<AllDocsResult>;
   changes(db: string, options: ChangesOptions): Promise<ChangesResult>;
