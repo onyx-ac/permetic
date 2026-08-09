@@ -326,9 +326,22 @@ export interface StorageCapability {
   compact(db: string, id: string, revs: readonly string[],
           tree: OpaqueRevTree): Promise<void>;
 
-  getLocal(db: string, id: string): Promise<Record<string, unknown> | null>;
-  putLocal(db: string, id: string, doc: Record<string, unknown>): Promise<string>;
-  removeLocal(db: string, id: string): Promise<void>;
+  /** null when no such local doc exists. Includes [rev] - PouchDB's `_getLocal`
+   *  callback must report `_rev` so a subsequent put can carry it forward. */
+  getLocal(db: string, id: string):
+    Promise<{ rev: string; body: Record<string, unknown> } | null>;
+  /**
+   * [prevRev] omitted -> the doc must not already exist. Throws CONFLICT if
+   * [prevRev] doesn't match the currently stored rev (including "doc doesn't
+   * exist but a rev was expected"). Returns the new rev, formatted "0-N".
+   */
+  putLocal(db: string, id: string, doc: Record<string, unknown>,
+           prevRev?: string): Promise<string>;
+  /**
+   * Throws CONFLICT if [prevRev] doesn't match the currently stored rev,
+   * NOT_FOUND if no such local doc exists at all.
+   */
+  removeLocal(db: string, id: string, prevRev: string): Promise<void>;
 
   /**
    * Attachment bodies use a binary side-channel, not the JSON envelope:
