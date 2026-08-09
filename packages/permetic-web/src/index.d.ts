@@ -45,8 +45,18 @@ export interface BridgeEvent {
 /**
  * The only host-specific code in the system. WebView: WebMessageListener.
  * Headless: one bound Zipline suspending function. Everything above is identical.
+ *
+ * `subscribeChanges` can't cross as a Promise<BridgeResponse> - it's a live push
+ * subscription, not a request/response call - so it isn't dispatched through the
+ * envelope the way every other StorageCapability method is. It's attached directly
+ * on the carrier object instead, mirroring StorageCapability's own split between
+ * envelope-dispatched methods and the three direct passthroughs
+ * (subscribeChanges/getAttachment/putAttachment).
  */
-export type Carrier = (req: BridgeRequest) => Promise<BridgeResponse>;
+export interface Carrier {
+  (req: BridgeRequest): Promise<BridgeResponse>;
+  subscribeChanges?(db: string, since: number, listener: (c: StoredDoc) => void): Unsubscribe;
+}
 
 export type BridgeErrorCode =
   | 'UNAVAILABLE'
