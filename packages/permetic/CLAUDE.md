@@ -22,10 +22,14 @@ features. The name is the promise: nothing is permitted that wasn't registered.
 
 ```
 ac.onyx.permetic
-  PermeticController        public entry point, built via PermeticController.Builder
-  PermeticWebViewClient     asset loading, navigation policy
-  transport/                envelope encode/decode, correlation, cancellation
-  capability/               capability interfaces, generated from the contract
+  PermeticController        public entry point, built via PermeticController.Builder (task 5, not yet built)
+  PermeticWebViewClient     asset loading, navigation policy (task 5, not yet built)
+  transport/                envelope encode/decode, correlation, cancellation — JVM-only,
+                             lint-enforced (detekt ForbiddenImport)
+  transport/android/        WebViewCarrier, JavascriptInterfaceFallback, BootstrapScript —
+                             the only Android-dependent transport code
+  capability/               capability interfaces, hand-mirrored from the contract
+                             (auth/push/billing/background/system; no storage — Mode A only)
   internal/                 nothing public, no stable API guarantee
 ```
 

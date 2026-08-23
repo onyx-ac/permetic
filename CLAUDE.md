@@ -46,7 +46,7 @@ The JS global is `permetic`.
 ./gradlew :permetic:test
 ./gradlew :permetic:connectedAndroidTest              # needs device/emulator
 ./gradlew ktlintCheck detekt                          # must pass before commit
-(cd packages/permetic-web && npm run build && npm run typecheck)
+(cd packages/permetic-web && npm run build && npm run typecheck && npm test)
 ```
 
 Never hand-edit anything under `src/main/assets/`. It is build output.
@@ -60,8 +60,12 @@ Never hand-edit anything under `src/main/assets/`. It is build output.
 - **Errors** cross as `BridgeError` codes from the contract. Never raw exception
   strings, never stack traces in release builds.
 - **Contract drift is a compile error.** Adding a method means: edit
-  `packages/permetic-web/src/index.d.ts`, regenerate the Kotlin dispatcher, fix the
-  implementations (here and in the `docstack` repo). Never one side only.
+  `packages/permetic-web/src/index.d.ts`, update the hand-mirrored Kotlin interfaces
+  in `capability/` and the shared `packages/permetic-web/contract/manifest.json`,
+  fix the implementations (here and in the `docstack` repo). Never one side only —
+  a capability-level change (adding/removing a `CapabilityName` entry) fails to
+  compile once `Dispatcher` exists (task 5); a method-level change fails
+  `ContractParityTest` (JVM) or `contract-parity.test.ts` (TS) today.
 - **Native never parses a revision tree.** Trees are opaque blobs it stores and
   returns. Merge semantics belong to `pouchdb-merge`, in JS. See ADR-0001.
 - **One protocol.** The adapter has no carrier branch in it. See ADR-0002.

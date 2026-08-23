@@ -151,11 +151,45 @@ Do these in order, one per review cycle.
 1. **Contract freeze.** Review `permetic-web/src/index.d.ts`. Generate the Kotlin
    dispatcher and `kotlinx.serialization` models from it. Add the CI check that
    fails when one side changes without the other.
+
+   **Done** (2026-08-23). Hand-written Kotlin mirrors rather than generated ones —
+   the contract is small and slow-changing, so a real codegen tool wasn't judged
+   worth building yet. Drift is still caught two ways: `CapabilityName` is a Kotlin
+   enum so the eventual `Dispatcher`'s `when (capability)` is non-exhaustive by
+   construction (a compile error on drift, not a runtime surprise), and a shared
+   `packages/permetic-web/contract/manifest.json` is checked independently by a JVM
+   test (`ContractParityTest`) and a TS test (`contract-parity.test.ts`, via
+   `ts-morph` parsing `index.d.ts` directly) — verified by temporarily renaming a
+   contract method and confirming the TS test caught it. `Dispatcher.kt` itself is
+   not built yet: it depends on the envelope (task 2) and the registry (task 5, not
+   started), so building it now would mean redoing it once the registry exists.
 2. **Envelope codec.** JVM-only, no Android types. Encode/decode, correlation ids,
    cancellation, subscription id allocation. Round-trip and fuzz tests.
+
+   **Done** (2026-08-23). `BridgeResponse` needed a hand-written `KSerializer` — its
+   TS union discriminates on the `ok` boolean with two different field sets, not a
+   `type` tag, so kotlinx.serialization's default sealed polymorphism (which adds
+   its own discriminator field) doesn't fit. Added a detekt `ForbiddenImport` rule
+   scoped to files directly under `transport/` (excluding `transport/android/`)
+   banning `android.*`/`androidx.*` imports, so the JVM-only constraint is a lint
+   failure, not just a convention — verified with a sabotage-and-revert check.
 3. **Transport.** `addWebMessageListener` + `addDocumentStartJavaScript`. Origin
    allowlist enforced on every message. `@JavascriptInterface` fallback behind a
    feature check. Binary side-channel for attachment bodies.
+
+   **Done** (2026-08-23), except the binary side-channel: deferred, since this
+   build never registers a `storage` capability (no DocStack integration). Neither
+   `WebViewCarrier` nor `JavascriptInterfaceFallback` depend on a concrete
+   dispatcher type — both take a plain `suspend (BridgeRequest) -> BridgeResponse`
+   function, so the transport stays buildable and testable independently of the
+   registry (task 5), matching ADR-0002's "the carrier has no dispatch branch in
+   it". Verified against a real device, not just compiled: booted the
+   `Medium_Phone_API_36.1` AVD already present on the dev machine (WHPX-accelerated,
+   headless) and ran `./gradlew :permetic:connectedDebugAndroidTest` — passes
+   end to end against the real `WebMessageListener` callback and the fixture page in
+   `androidTest/assets/`, no mocked `permetic` object. (Caught and fixed one real
+   bug in the process: `ActivityScenario.launch` needs a manifest-declared launcher
+   activity, not the bare framework `Activity` class.)
 4. **`permetic-web` runtime.** Builds `window.permetic` from a `Carrier`: promise
    correlation, subscription bookkeeping, version handshake, and
    `createMockPermetic()` for the web app's browser-mode dev server.
