@@ -1,0 +1,12 @@
+{
+  "auth": ["getToken", "refresh", "signOut", "currentAccount", "onAccountChange"],
+  "push": ["requestPermission", "permissionState", "getToken", "onToken", "onMessage", "initialMessage"],
+  "billing": ["queryProducts", "purchase", "queryPurchases", "acknowledge", "consume", "onPurchaseUpdate"],
+  "background": ["schedule", "cancel", "status", "onStatusChange"],
+  "storage": [
+    "info", "getDoc", "getRevTrees", "bulkWrite", "allDocs", "changes", "subscribeChanges",
+    "revsDiff", "bulkGet", "compact", "getLocal", "putLocal", "removeLocal",
+    "getAttachment", "putAttachment", "destroy", "close"
+  ],
+  "system": ["info", "log", "share", "openUrl", "onLifecycle"]
+}

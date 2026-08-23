@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Kotlin
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# npm
+node_modules/
+dist/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

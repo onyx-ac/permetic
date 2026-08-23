@@ -1,0 +1,19 @@
+{
+  "name": "permetic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.11",
+    "ts-morph": "^24.0.0"
+  }
+}
