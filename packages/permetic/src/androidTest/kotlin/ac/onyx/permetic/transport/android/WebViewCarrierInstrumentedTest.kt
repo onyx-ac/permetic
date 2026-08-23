@@ -3,7 +3,6 @@ package ac.onyx.permetic.transport.android
 import ac.onyx.permetic.transport.BridgeResponse
 import ac.onyx.permetic.transport.BridgeResponseSerializer
 import ac.onyx.permetic.transport.CONTRACT_VERSION
-import android.app.Activity
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -56,7 +55,7 @@ public class WebViewCarrierInstrumentedTest {
         var replyText: String? = null
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-        ActivityScenario.launch(Activity::class.java).use { scenario ->
+        ActivityScenario.launch(TestActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val webView = WebView(activity)
                 webView.settings.javaScriptEnabled = true
