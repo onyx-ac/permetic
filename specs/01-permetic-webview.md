@@ -193,6 +193,25 @@ Do these in order, one per review cycle.
 4. **`permetic-web` runtime.** Builds `window.permetic` from a `Carrier`: promise
    correlation, subscription bookkeeping, version handshake, and
    `createMockPermetic()` for the web app's browser-mode dev server.
+
+   **Done** (2026-08-23), except `storage` (same reason as task 3 — no DocStack
+   integration in this build). Two corrections to this task's own framing, worth
+   recording: "promise correlation" isn't actually needed inside `buildPermetic` —
+   the `Carrier`'s own returned `Promise` already correlates each call; what needs
+   bookkeeping is unsolicited `BridgeEvent` routing to `onXxx` subscription
+   listeners, so `buildPermetic` takes an explicit `onEvent` registration function
+   rather than reading a global. And `index.d.ts` never actually specifies how an
+   `onXxx` subscription gets *cancelled* (only storage's `subscribeChanges` is
+   called out as a carrier-level special case) — established a convention to fill
+   that gap: cancellation reuses the normal envelope with a reserved method name
+   `"unsubscribe"` under the same capability. This is internal wire protocol, not
+   part of the public contract, but **`Dispatcher` (task 5) needs to honor it** —
+   every capability with an `onXxx` method must handle an `"unsubscribe"` request
+   carrying `[subscriptionId]` and cancel the corresponding `Flow` collector.
+   `system`/`auth` build unconditionally per the non-optional `Permetic` fields;
+   `push`/`billing`/`background` are gated on `available(name)`. The barrel entry
+   is `main.ts`, not `index.ts` — an `index.ts` alongside the existing `index.d.ts`
+   would make `tsc`'s declaration emit collide with the frozen contract file.
 5. **`PermeticController` + registry.** Builder, lifecycle binding, Activity weak
    reference, cancellation on destroy, subscription survival across config changes.
 6. **`system` and `auth`.** Token caching and a `refresh()` path for Drive 401s.
