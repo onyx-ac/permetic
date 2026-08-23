@@ -19,7 +19,9 @@ public data class Account(
 )
 
 /** Mirrors `AuthCapability` in `index.d.ts`. */
-public interface AuthCapability {
+public interface AuthCapability : PermeticCapability {
+    public override val name: CapabilityName get() = CapabilityName.AUTH
+
     /**
      * webview: may show an interactive account picker when [interactive] is true.
      * headless: MUST NOT show UI. Rejects UNAUTHENTICATED if no cached token.

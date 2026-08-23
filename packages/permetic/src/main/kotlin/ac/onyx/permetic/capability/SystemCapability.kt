@@ -58,7 +58,9 @@ public data class SharePayload(
 )
 
 /** Mirrors `SystemCapability` in `index.d.ts`. */
-public interface SystemCapability {
+public interface SystemCapability : PermeticCapability {
+    public override val name: CapabilityName get() = CapabilityName.SYSTEM
+
     public suspend fun info(): SystemInfo
 
     public fun log(

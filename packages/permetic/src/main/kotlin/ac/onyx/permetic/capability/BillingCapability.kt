@@ -46,7 +46,9 @@ public data class Purchase(
 )
 
 /** Mirrors `BillingCapability` in `index.d.ts`. Webview only. */
-public interface BillingCapability {
+public interface BillingCapability : PermeticCapability {
+    public override val name: CapabilityName get() = CapabilityName.BILLING
+
     public suspend fun queryProducts(
         ids: List<String>,
         type: ProductType,

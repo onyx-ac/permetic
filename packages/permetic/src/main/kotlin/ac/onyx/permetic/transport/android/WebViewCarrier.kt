@@ -1,5 +1,6 @@
 package ac.onyx.permetic.transport.android
 
+import ac.onyx.permetic.transport.BridgeEvent
 import ac.onyx.permetic.transport.BridgeRequest
 import ac.onyx.permetic.transport.BridgeResponse
 import ac.onyx.permetic.transport.EnvelopeCodec
@@ -24,12 +25,22 @@ import kotlinx.serialization.SerializationException
  * it"), which keeps the transport buildable and unit-testable independently of the
  * capability registry (spec 01 task 5). [scope] runs dispatch off the WebView
  * callback thread, per root CLAUDE.md's threading rule.
+ *
+ * Also the event sink for unsolicited [BridgeEvent]s (subscription pushes — spec 01
+ * task 4/5): [pushEvent] reuses the *last-seen* [JavaScriptReplyProxy], which Android
+ * supports calling again outside the [onPostMessage] invocation that produced it.
+ * Best-effort — if the page has since navigated away and the retained proxy has gone
+ * stale, the underlying `postMessage` is a silent no-op on the JS side rather than a
+ * crash on this one.
  */
 public class WebViewCarrier(
     private val allowedOrigins: Set<String>,
     private val scope: CoroutineScope,
     private val dispatch: suspend (BridgeRequest) -> BridgeResponse,
 ) : WebViewCompat.WebMessageListener {
+    @Volatile
+    private var lastReplyProxy: JavaScriptReplyProxy? = null
+
     override fun onPostMessage(
         view: WebView,
         message: WebMessageCompat,
@@ -39,6 +50,7 @@ public class WebViewCarrier(
     ) {
         // Origin check first, unconditionally, before anything else is even parsed.
         if (!isOriginAllowed(sourceOrigin.toString(), allowedOrigins)) return
+        lastReplyProxy = replyProxy
         val text = message.data ?: return
 
         scope.launch {
@@ -50,5 +62,9 @@ public class WebViewCarrier(
                 }
             replyProxy.postMessage(EnvelopeCodec.encodeResponse(response))
         }
+    }
+
+    public fun pushEvent(event: BridgeEvent) {
+        lastReplyProxy?.postMessage(EnvelopeCodec.encodeEvent(event))
     }
 }

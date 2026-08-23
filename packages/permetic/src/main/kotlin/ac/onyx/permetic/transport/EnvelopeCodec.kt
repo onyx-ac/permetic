@@ -11,9 +11,14 @@ import kotlinx.serialization.json.Json
  * Malformed input throws [kotlinx.serialization.SerializationException], never a raw
  * unchecked parser crash — callers map that to a [BridgeErrorCode.INVALID_ARGUMENT]
  * response rather than letting it propagate as a stack trace.
+ *
+ * [json] is exposed (not just the top-level encode/decode functions above) because
+ * the dispatcher (spec 01 task 5) needs the same configured instance to decode
+ * individual [BridgeRequest.args] elements and encode individual method results —
+ * one shared `Json`, not a second differently-configured one.
  */
 public object EnvelopeCodec {
-    private val json =
+    public val json: Json =
         Json {
             ignoreUnknownKeys = true
             explicitNulls = false

@@ -42,7 +42,9 @@ public data class BackgroundJobStatus(
 )
 
 /** Mirrors `BackgroundCapability` in `index.d.ts`. Schedules the native sync worker. */
-public interface BackgroundCapability {
+public interface BackgroundCapability : PermeticCapability {
+    public override val name: CapabilityName get() = CapabilityName.BACKGROUND
+
     /** Re-registering the same [BackgroundJobSpec.id] replaces the schedule. */
     public suspend fun schedule(spec: BackgroundJobSpec)
 

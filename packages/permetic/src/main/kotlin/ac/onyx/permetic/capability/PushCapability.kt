@@ -38,7 +38,9 @@ public data class PushMessage(
 )
 
 /** Mirrors `PushCapability` in `index.d.ts`. Webview only. */
-public interface PushCapability {
+public interface PushCapability : PermeticCapability {
+    public override val name: CapabilityName get() = CapabilityName.PUSH
+
     /** Requests `POST_NOTIFICATIONS` on Android 13+. */
     public suspend fun requestPermission(): PermissionState
 
