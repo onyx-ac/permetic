@@ -7,3 +7,12 @@ config:
 style:
   MagicNumber:
     active: false
+  # ac.onyx.permetic.transport (excluding the transport/android/ subpackage, added in
+  # spec 01 task 3) is JVM-only and must stay testable without Robolectric or
+  # instrumentation — see spec 01, task 2.
+  ForbiddenImport:
+    active: true
+    includes: ['**/ac/onyx/permetic/transport/*.kt']
+    imports:
+      - 'android.*'
+      - 'androidx.*'
