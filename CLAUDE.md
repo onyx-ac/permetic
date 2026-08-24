@@ -13,6 +13,7 @@ This repo is the **Permetic monorepo**. Each module lives under `packages/`:
 | Module              | Path                        | Coordinates / package                | Role                                                          |
 | ------------------- | ---------------------------- | ------------------------------------- | ------------------------------------------------------------- |
 | `permetic`          | `packages/permetic`          | `ac.onyx.permetic:permetic-core`      | WebView host. Runs the web app, grants scoped native access.  |
+| `permetic-auth-google` | `packages/permetic-auth-google` | `ac.onyx.permetic:permetic-auth-google` | Google identity via Credential Manager. Optional artifact — keeps Play Services out of core. |
 | `permetic-push`     | `packages/permetic-push`     | `ac.onyx.permetic:permetic-push`      | FCM capability. Optional artifact.                            |
 | `permetic-billing`  | `packages/permetic-billing`  | `ac.onyx.permetic:permetic-billing`   | Play Billing capability. Optional artifact.                   |
 | `permetic-web`      | `packages/permetic-web`      | npm `permetic`                        | Contract types + JS runtime that builds the global.           |
@@ -58,7 +59,10 @@ Never hand-edit anything under `src/main/assets/`. It is build output.
 - **No JS string interpolation.** Everything crosses as a `BridgeRequest` envelope.
   `evaluate("Foo.put('$id')")` is an injection bug and is banned.
 - **Errors** cross as `BridgeError` codes from the contract. Never raw exception
-  strings, never stack traces in release builds.
+  strings, never stack traces in release builds. A capability reports one by throwing
+  `CapabilityException(code, message)` — its `message` reaches JS, so keep it a short
+  safe diagnostic. Anything else a capability throws becomes an opaque `INTERNAL`
+  carrying only the exception's type name.
 - **Contract drift is a compile error.** Adding a method means: edit
   `packages/permetic-web/src/index.d.ts`, update the hand-mirrored Kotlin interfaces
   in `capability/` and the shared `packages/permetic-web/contract/manifest.json`,

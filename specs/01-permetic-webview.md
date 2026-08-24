@@ -241,6 +241,63 @@ Do these in order, one per review cycle.
    registered fake capability → reply, decoded on the JS side) alongside task 3's
    instrumented test — both pass.
 6. **`system` and `auth`.** Token caching and a `refresh()` path for Drive 401s.
+
+   **Done** (2026-08-24), with this task's own framing corrected in one place:
+   "Drive 401s" predates the Mode A app this round targets, which talks to
+   Firestore and never touches Drive. The mechanism is the same and is not
+   Drive-specific — a downstream API rejects a token, the caller calls `refresh()` —
+   so only the wording was stale. **Open decision D-1 is resolved**: Google via
+   Credential Manager, in a new optional `:permetic-auth-google` module so
+   `permetic-core` stays free of Play Services (GMS enters only through Credential
+   Manager's pre-API-34 backend). `GoogleTokenProvider` returns **Google ID tokens**,
+   which is what a Firebase-Auth-fronted Firestore app needs; a non-empty `scopes`
+   argument is rejected with `UNAVAILABLE` rather than quietly answered with an
+   unscoped token, since scoped OAuth needs `AuthorizationClient` plus an
+   activity-result consent flow and this build has no caller for it. Token expiry is
+   a conservative fixed lifetime rather than the JWT's own `exp` claim: decoding it
+   would mean trusting a payload whose signature we never verify, to save a round
+   trip `refresh()` already handles, and `java.util.Base64` needs API 26 against
+   `minSdk 24`.
+
+   `auth` is split so that caching is provider-independent and unit-testable with no
+   emulator and no Google account: `CachingAuthCapability` (core) owns the cache,
+   single-flight and account-change bookkeeping; `TokenProvider` (core) owns identity.
+   Two behaviours are worth recording because they are not obvious from the task text.
+   **Concurrent callers share one fetch** — a cold-starting web app fires several
+   requests at once, and without collapsing them that is N provider round trips and
+   potentially N account pickers. **`refresh()` is not `getToken()` with the cache
+   cleared**: the caller is telling us the token it holds was rejected, so a refresh
+   must not return one fetched before that point, which means ignoring the cache *and*
+   declining to join a `getToken()` fetch already in flight (it does collapse with
+   other concurrent refreshes, the common case when several parallel requests all 401
+   together). A sign-out during an in-flight fetch is handled with an epoch counter so
+   the returning fetch cannot repopulate the cache it just cleared.
+
+   Two gaps in task 5's `Dispatcher` surfaced here, since this is the first round with
+   real capabilities behind it. There was no public way for a capability to report a
+   contract error code (`DispatchException` is `internal`) — now `CapabilityException`.
+   And an unexpected exception escaped `dispatch()` entirely, which would leave
+   `PermeticController.trackedDispatch` awaiting a result that never arrives and hang
+   the web app's promise **forever**; `dispatch()` now maps anything unrecognised to an
+   opaque `INTERNAL` carrying only the exception's type name, never its message
+   (root `CLAUDE.md`: never raw exception strings), and re-throws
+   `CancellationException` ahead of that so teardown still works.
+
+   `openUrl` validates the scheme before building the implicit intent — a
+   web-app-supplied `intent://` can reach other apps' components and `file://` can
+   hand over a local file, so only `http`/`https` with a real host are forwarded.
+   `share`/`openUrl` fall back to the application context with `FLAG_ACTIVITY_NEW_TASK`
+   when the `Activity` is gone rather than returning `UNAVAILABLE` as this doc's
+   lifecycle rule says: the call genuinely succeeds that way, and refusing something
+   that would have worked is the worse contract. `rebind(activity)` re-points both
+   `AndroidSystemCapability` and `GoogleTokenProvider` after a configuration change.
+
+   Verified on a real device: 83 JVM unit tests, and 6 instrumented tests on the
+   booted `Medium_Phone_API_36.1` emulator — including the real capability answering
+   the real `window.permetic` global end to end through the existing fixture page,
+   with nothing faked on either side. `GoogleTokenProvider` itself has **no automated
+   test**: it needs a signed-in Google account and a real `serverClientId`, so it
+   needs a manual device run before it can be called verified.
 7. **`permetic-push`.** FCM token, `POST_NOTIFICATIONS` on API 33+, foreground
    message delivery, cold-start tap payload consumed exactly once.
 8. **`permetic-billing`.** Play Billing 7, Activity-scoped, purchase / acknowledge
@@ -272,8 +329,12 @@ End-to-end acceptance: the sample app loads, obtains a Drive token through
 
 ## Open decisions
 
-- **D-1** Auth provider: Credential Manager + `AuthorizationClient`, or AppAuth?
-  Play Services is easier but ties you to GMS builds.
+- **D-1** ~~Auth provider: Credential Manager + `AuthorizationClient`, or AppAuth?
+  Play Services is easier but ties you to GMS builds.~~ **Resolved (2026-08-24)**:
+  Credential Manager, isolated in the optional `:permetic-auth-google` module so
+  `permetic-core` stays GMS-free and a non-GMS build can supply its own
+  `TokenProvider`. `AuthorizationClient` was not needed — this app wants ID tokens,
+  not scoped OAuth. See task 6.
 - **D-2** `minSdk`. 24 widens reach; 26 removes WorkManager and notification-channel
   branching.
 - **D-3** One Gradle repo with `docstack-*`, or two repos sharing the contract as a
