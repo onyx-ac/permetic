@@ -12,7 +12,13 @@ style:
   # instrumentation — see spec 01, task 2.
   ForbiddenImport:
     active: true
-    includes: ['**/ac/onyx/permetic/transport/*.kt']
+    # Files directly under transport/ and ota/ are JVM-only by design, so their whole
+    # state machines stay unit-testable without an emulator. The `android` subpackages
+    # (transport/android/, ota/android/) are the deliberate exception and are not
+    # matched by the single `*` here.
+    includes:
+      - '**/ac/onyx/permetic/transport/*.kt'
+      - '**/ac/onyx/permetic/ota/*.kt'
     imports:
       - 'android.*'
       - 'androidx.*'

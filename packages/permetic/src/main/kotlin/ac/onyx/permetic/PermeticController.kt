@@ -3,6 +3,8 @@ package ac.onyx.permetic
 import ac.onyx.permetic.capability.PermeticCapability
 import ac.onyx.permetic.internal.CapabilityRegistry
 import ac.onyx.permetic.internal.Dispatcher
+import ac.onyx.permetic.ota.OtaBundleStore
+import ac.onyx.permetic.ota.android.SubfolderAssetsPathHandler
 import ac.onyx.permetic.transport.BridgeError
 import ac.onyx.permetic.transport.BridgeErrorCode
 import ac.onyx.permetic.transport.BridgeEvent
@@ -19,7 +21,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.lang.ref.WeakReference
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Public entry point. A WebView that runs the web app and grants it scoped,
@@ -46,7 +51,12 @@ public class PermeticController private constructor(
     activity: Activity,
     private val allowedOrigins: Set<String>,
     private val registry: CapabilityRegistry,
+    private val assetsSubfolder: String,
+    private val ota: OtaBundleStore?,
+    private val liveBundle: File?,
 ) {
+    private val bootConfirmed = AtomicBoolean(false)
+
     private val activityRef = WeakReference(activity)
     private val pending = PendingRequestTable()
     private val workJob = SupervisorJob()
@@ -82,7 +92,25 @@ public class PermeticController private constructor(
                 JS_OBJECT_NAME,
             )
         }
-        webView.webViewClient = PermeticWebViewClient(webView.context)
+        webView.webViewClient =
+            PermeticWebViewClient(webView.context, assetsSubfolder, liveBundle)
+    }
+
+    /**
+     * Confirms the currently-served OTA bundle actually runs, so it becomes the
+     * rollback target (see [OtaBundleStore.markBootSuccessful]). No-op without OTA
+     * configured, and after the first call.
+     *
+     * [trackedDispatch] calls this on the first successful bridge request, which is a
+     * genuine liveness signal — the JS bundle parsed, the `permetic-web` runtime
+     * initialised, and it reached native — and unlike a page-load callback it is not
+     * something a white-screening bundle also produces. Call it explicitly instead if
+     * the web app has a stronger "I am actually working" moment to report.
+     */
+    public suspend fun markWebAppReady() {
+        val store = ota ?: return
+        if (!bootConfirmed.compareAndSet(false, true)) return
+        withContext(Dispatchers.IO) { store.markBootSuccessful() }
     }
 
     /**
@@ -119,23 +147,33 @@ public class PermeticController private constructor(
             val response = dispatcher.dispatch(request)
             pending.resolve(request.id, response)
         }
-        return deferred.await()
+        val response = deferred.await()
+        if (response is BridgeResponse.Success) markWebAppReady()
+        return response
     }
 
     public class Builder(private val activity: Activity) {
         private val allowedOrigins = mutableSetOf<String>()
         private val registry = CapabilityRegistry()
+        private var assetsSubfolder: String = ""
+        private var ota: OtaBundleStore? = null
 
         public fun allowOrigin(origin: String): Builder = apply { allowedOrigins.add(origin) }
 
         /**
-         * Accepted to match spec 01's builder shape; currently unused. See
-         * [PermeticWebViewClient]'s KDoc — androidx.webkit 1.12.1's
-         * `AssetsPathHandler` has no subfolder parameter, so this doesn't yet change
-         * where assets are read from.
+         * Subfolder of `src/main/assets/` holding the bundled web app, e.g.
+         * `assets("web")`. Empty (the default) serves from the assets root. Honoured
+         * as of task 10 via [SubfolderAssetsPathHandler]; it was accepted and ignored
+         * before that.
          */
-        @Suppress("UnusedParameter")
-        public fun assets(path: String): Builder = apply { /* not yet wired - see KDoc */ }
+        public fun assets(path: String): Builder = apply { assetsSubfolder = path }
+
+        /**
+         * Enables OTA. The live directory is chosen **here**, at build time, not at
+         * [attach] — so a bundle installed while the app runs applies on the next
+         * launch and a running session never changes underneath itself (spec 01, D-5).
+         */
+        public fun ota(store: OtaBundleStore): Builder = apply { ota = store }
 
         public fun capability(capability: PermeticCapability): Builder =
             apply {
@@ -147,6 +185,9 @@ public class PermeticController private constructor(
                 activity,
                 allowedOrigins.toSet(),
                 registry,
+                assetsSubfolder,
+                ota,
+                ota?.resolve(),
             )
     }
 
