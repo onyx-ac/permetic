@@ -27,3 +27,8 @@ rootProject.name = "permetic-android"
 // artifacts that don't exist. Add them when their tasks (spec 01, tasks 7-8) start.
 include(":permetic")
 project(":permetic").projectDir = file("packages/permetic")
+
+// Optional artifact, separate so permetic-core stays free of Play Services: only
+// Credential Manager's pre-API-34 backend pulls GMS in (spec 01, open decision D-1).
+include(":permetic-auth-google")
+project(":permetic-auth-google").projectDir = file("packages/permetic-auth-google")

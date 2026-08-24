@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.webkit)
+    implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.lifecycle.common)
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlin.test.junit)
