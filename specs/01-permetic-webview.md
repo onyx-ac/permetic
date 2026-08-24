@@ -308,6 +308,60 @@ Do these in order, one per review cycle.
     `InternalStoragePathHandler` for downloaded ones, a resolver choosing the live
     directory, signature verification, atomic swap, rollback on failed boot, and
     the contract-version check at startup.
+
+    **Done** (2026-08-24), read side only — `OtaBundleStore` is deliberately **not** a
+    downloader. How a bundle arrives (WorkManager poll, push wakeup, launch check) is
+    spec 06's open D-1; the seam here is `install(staging)`, which takes an
+    already-downloaded directory. **D-4 and D-5 are resolved**: a separate content key,
+    so it can be rotated without a store release, and next-launch-only application —
+    `resolve()` picks the live directory at startup, so `install()` moving the pointer
+    mid-session never changes a running app underneath itself. ECDSA P-256 rather than
+    Ed25519, which needs API 33 against `minSdk 24`.
+
+    Everything except the path handlers is JVM-only, enforced by extending task 2's
+    detekt `ForbiddenImport` rule to `ota/` (verified by sabotage-and-revert). That is
+    not tidiness: it means the entire verify/activate/rollback state machine runs under
+    real unit tests against a temp directory, which matters for code whose failure mode
+    is "an unverified download becomes remote code execution".
+
+    Verification refuses a bundle four ways, and the third is the one a per-file-digest
+    check alone would miss: **a file present that the manifest does not cover**, which
+    is exactly how an extra unvouched-for script would ride into an otherwise-intact
+    tree. `install()` additionally rejects a `bundleVersion` that does not supersede the
+    active one — without that guard, replaying a genuinely-signed *older* bundle
+    reintroduces a fixed vulnerability while every signature check passes.
+
+    Two deviations from what this doc and spec 06 sketch, both deliberate. The
+    signature is **detached** (`manifest.sig`) rather than a field inside the manifest:
+    signing bytes that contain the signature requires both sides to agree on a canonical
+    serialization of everything-but-that-field, and any disagreement silently becomes a
+    verification failure. And pointer state uses **two alternating slots** rather than
+    write-temp-then-atomically-rename, because `java.nio.file.Files.move` is API 26 and
+    `File.renameTo` is not atomic over an existing target on every platform; a crash
+    mid-write can only corrupt the slot that was not being read from.
+
+    Rollback hinges on knowing a bundle actually ran. `PermeticController` confirms it
+    on the **first successful bridge request** — the JS parsed, the `permetic-web`
+    runtime initialised, and it reached native — which, unlike a page-load callback, is
+    not something a white-screening bundle also produces. `markWebAppReady()` is public
+    for apps with a stronger readiness signal.
+
+    This also finally makes `Builder.assets(path)` real, which it had not been since
+    task 5: `SubfolderAssetsPathHandler` prepends the subfolder and **delegates** to
+    `AssetsPathHandler` rather than reimplementing asset lookup, so MIME detection,
+    `index.html` resolution and containment stay androidx's job. Only one handler is
+    ever registered — OTA bundle or APK assets, chosen at startup — not a fallback chain
+    across both: a bundle is verified as a complete tree, so quietly filling a gap in it
+    from another source would serve a mix nothing vouched for.
+
+    Verified: 108 JVM unit tests (25 new, covering every rejection path and the full
+    rollback state machine) and 9 instrumented tests on the booted
+    `Medium_Phone_API_36.1` emulator, including a signed bundle installed, resolved and
+    served to a real WebView end to end. Signing runs under Android's security provider
+    there rather than the desktop JVM's, which the unit tests cannot exercise.
+    Still open for a later round: signature verification currently trusts a public key
+    the embedding app supplies, so **key provisioning and rotation are the host app's
+    problem** and undesigned here.
 11. **Hardening pass.** Settings lockdown, navigation policy (external links to the
     browser), file chooser, runtime permission mapping, back handling, CSP for the
     bundled assets.
@@ -339,8 +393,11 @@ End-to-end acceptance: the sample app loads, obtains a Drive token through
   branching.
 - **D-3** One Gradle repo with `docstack-*`, or two repos sharing the contract as a
   published artifact?
-- **D-4** OTA signing: reuse the app signing identity, or a separate content key?
-  A separate key lets you rotate without a store release.
-- **D-5** Does OTA'd content apply on next launch only, or can it hot-swap on
-  resume? Next-launch-only is simpler and avoids a running app changing underneath
-  itself mid-session.
+- **D-4** ~~OTA signing: reuse the app signing identity, or a separate content key?~~
+  **Resolved (2026-08-24)**: a separate content key (ECDSA P-256), for exactly the
+  rotation reason. Provisioning and rotation of that key are not designed yet — the
+  verifier takes whatever public key the embedding app hands it. See task 10.
+- **D-5** ~~Does OTA'd content apply on next launch only, or can it hot-swap on
+  resume?~~ **Resolved (2026-08-24)**: next-launch-only, for the stated reason.
+  `OtaBundleStore.resolve()` picks the live directory at startup and nothing re-reads
+  it afterwards, so this is structural rather than a convention to remember. See task 10.
