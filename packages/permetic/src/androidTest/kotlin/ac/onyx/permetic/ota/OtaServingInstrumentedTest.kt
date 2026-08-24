@@ -80,7 +80,10 @@ public class OtaServingInstrumentedTest {
         val response = handler.handle("hello.txt")
 
         assertNotNull("expected assets/web/hello.txt to be served", response)
-        assertEquals("hello from the assets subfolder", response!!.data.bufferedReader().readText().trim())
+        assertEquals(
+            "hello from the assets subfolder",
+            response!!.data.bufferedReader().readText().trim(),
+        )
     }
 
     @Test
