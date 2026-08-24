@@ -214,6 +214,32 @@ Do these in order, one per review cycle.
    would make `tsc`'s declaration emit collide with the frozen contract file.
 5. **`PermeticController` + registry.** Builder, lifecycle binding, Activity weak
    reference, cancellation on destroy, subscription survival across config changes.
+
+   **Done** (2026-08-23). This is where `Dispatcher.kt` finally landed — deferred
+   since task 1 because it needed a registry to dispatch into. `CapabilityRegistry`
+   keys on each capability interface's own default `name` property (the five task-1
+   interfaces were retrofitted to extend a new `PermeticCapability` marker for
+   this). `Dispatcher`'s `when (capability)` has no `else` branch, so the
+   contract-freeze promise ("adding a capability without a dispatch line is a
+   compile error") is now real, not just a plan. One design decision beyond what
+   was planned: `WebViewCarrier`'s "await a reply, then send it" coroutines and the
+   actual dispatch work run on two deliberately separate coroutine scopes —
+   cancelling one scope on teardown to stop wasted work would, if it were the same
+   scope, also kill the coroutine responsible for sending back the `CANCELLED`
+   reply. `PendingRequestTable` (built in task 2, unused until now) mediates
+   between them. `WebViewCarrier` also gained `pushEvent()`, reusing the
+   last-seen `JavaScriptReplyProxy` to deliver unsolicited `BridgeEvent`s — Android's
+   API supports this outside the `onPostMessage` call that produced the proxy.
+   `PermeticWebViewClient` only wraps `AssetsPathHandler` at the assets root
+   (verified against the real androidx.webkit 1.12.1 class, not assumed — it has no
+   subfolder constructor parameter, so `.assets("web")` is kept on the `Builder` to
+   match this doc's own example shape but doesn't yet change where files are read
+   from). `BootstrapScript` (task 3) isn't wired into `attach()` yet — there's no
+   real `permetic-web` bundle in this repo's assets to inject. Verified on a real
+   device: booted the `Medium_Phone_API_36.1` emulator and ran a new
+   `PermeticControllerInstrumentedTest` (`attach()` → real `Dispatcher` → a
+   registered fake capability → reply, decoded on the JS side) alongside task 3's
+   instrumented test — both pass.
 6. **`system` and `auth`.** Token caching and a `refresh()` path for Drive 401s.
 7. **`permetic-push`.** FCM token, `POST_NOTIFICATIONS` on API 33+, foreground
    message delivery, cold-start tap payload consumed exactly once.
