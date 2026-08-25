@@ -66,6 +66,7 @@ Web app (unchanged) ──> @docstack/client ──> PouchDB ──> adapter (mo
        ├── PushCapability        (permetic-push, optional)    │
        ├── BillingCapability     (permetic-billing, optional) │
        ├── BackgroundCapability  (permetic-core) ──> WorkManager
+       ├── PipCapability         (permetic-core) ──> Activity PiP; see spec 07
        └── StorageCapability     (docstack-permetic, optional) ──> docstack-store
 ```
 
@@ -143,6 +144,9 @@ This is the same problem Zipline's module loading solves for the headless bundle
   `CANCELLED`. They are never silently dropped.
 - Subscriptions survive configuration changes: keyed by subscription id and
   re-attached, not recreated.
+- Picture-in-Picture does **not** cross the foreground/background boundary — the
+  Activity is paused but stays visible — so `system.onLifecycle()` keeps reporting
+  `foreground` throughout. PiP has its own signal; see spec 07.
 
 ## Tasks
 
@@ -365,6 +369,14 @@ Do these in order, one per review cycle.
 11. **Hardening pass.** Settings lockdown, navigation policy (external links to the
     browser), file chooser, runtime permission mapping, back handling, CSP for the
     bundled assets.
+
+12. **`pip`.** Picture-in-Picture. Adds a `pip` capability, since Android WebView
+    does not implement the Web Picture-in-Picture API at all — Activity PiP is the
+    only mechanism, and it shrinks the whole WebView, so this is a mode the web app
+    has to re-lay-out for rather than a fire-and-forget call. Designed in **spec 07**,
+    including the manifest attributes the embedding app must declare (getting
+    `configChanges` wrong reloads the page mid-video). Independent of tasks 7–11 and
+    can proceed in parallel from task 6 onward.
 
 Storage is spec 02 and can proceed in parallel from task 3 onward.
 
