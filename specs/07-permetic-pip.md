@@ -12,7 +12,9 @@ capability registry; this spec owns the `pip` capability that plugs into it.
 ## Non-goals
 
 - Playback itself. Permetic does not own the player, the codec, or the media
-  pipeline. The `<video>` element stays the web app's.
+  pipeline. The `<video>` element stays the web app's. Fullscreen *handling* is in
+  scope, though — see below; it is the mechanism PiP is built on, not a separate
+  feature.
 - A native media notification / lock-screen controls. That is `MediaSession`
   territory and a separate decision (see D-2).
 - Android TV. TV's PiP is a different surface with different rules; the contract
@@ -31,30 +33,60 @@ The only mechanism available is **Activity** Picture-in-Picture —
 `Activity.enterPictureInPictureMode(PictureInPictureParams)`. That is native API,
 reachable only from Kotlin, which is exactly the shape Permetic exists to bridge.
 
-## The part that is not an RPC call
+## Fullscreen first: what actually ends up in the PiP window
 
-Activity PiP shrinks **the whole Activity**, and therefore the whole WebView. The
-web app does not get a floating video element — it gets its entire UI rendered at
-roughly a quarter of the screen. Left alone that looks broken: navigation bars,
-headers and controls, all shrunk to illegibility around the video.
+The PiP window shows **whatever the Activity's window contains**. That one fact
+decides the design, and it cuts both ways.
 
-So `pip` is a **mode, not a call**. `enter()` is the smaller half; the load-bearing
-half is the web app knowing it is in PiP so it can strip itself down to just the
-media. That makes `onModeChange()` mandatory, not a convenience.
+Enter PiP while the WebView is showing its ordinary page and the user gets the entire
+web app rendered at roughly a quarter of the screen — navigation, headers and controls
+shrunk to illegibility around the video. That is the bad path, and it is the one you
+get by doing nothing special.
 
-Two channels report the same transition, deliberately:
+The good path goes through fullscreen. When a page calls `video.requestFullscreen()`,
+WebView hands the app a **native `View` containing only the fullscreened element**,
+through `WebChromeClient.onShowCustomView`. Attach that view over the WebView and the
+Activity's content *is* the video — so entering PiP from there yields a window with
+just the video in it, needing no cooperation from the page's layout at all.
 
-- **CSS media queries fire on their own.** The window really is resized, so the
-  viewport changes and the app's own breakpoints re-evaluate with no bridge round
-  trip. This is the fast path and should carry the *layout*.
-- **`onModeChange()` is authoritative.** A tiny viewport and a PiP window are not
-  the same fact, and only the bridge can tell them apart. This should carry
-  *behaviour*: pausing polling, suppressing overlays and dialogs, disabling
-  interactions that cannot work in a window with no keyboard and no touch targets.
+```
+video.requestFullscreen()
+  -> WebChromeClient.onShowCustomView(videoView, callback)
+  -> attach videoView over the WebView, WebView hidden underneath
+  -> enterPictureInPictureMode(params)
+  -> the PiP window contains videoView, and nothing else
+```
 
-Relying on the bridge event alone means a visible frame or two of full UI at PiP
-size. Relying on the media query alone means a phone in a narrow layout gets treated
-as PiP. Use both.
+The order is **fullscreen, then PiP** — not PiP directly. `pip.enter()` called without
+anything in fullscreen still works, but it takes the shrink-everything path below.
+
+### This does not work today
+
+Permetic sets a `WebViewClient` and no `WebChromeClient` at all.
+`onShowCustomView`'s default implementation does nothing, so **HTML5 fullscreen video
+is currently broken in Permetic outright** — a page calling `requestFullscreen()` gets
+no fullscreen and no error. That is a gap independent of PiP, and a prerequisite for
+it: task 12 has to land fullscreen handling before it can land PiP. See D-6.
+
+## The fallback, and when it is the only option
+
+Not every PiP-worthy surface is a single fullscreenable element. A video call
+compositing local and remote streams with its own controls, a live map, a running
+dashboard — for these the page may genuinely want its whole document in the window.
+Then the Activity does shrink wholesale and the page has to re-lay-out for it.
+
+That is why `onModeChange()` stays in the contract rather than being an artifact of
+the shrink path. In the fullscreen path it carries *behaviour* only — pause polling,
+suppress dialogs and toasts, drop interactions that cannot work in a window with no
+keyboard. In the fallback path it carries layout too, and there the split matters:
+
+- **CSS media queries fire on their own.** The window really is resized, so the page's
+  own breakpoints re-evaluate with no bridge round trip. Fast path, layout.
+- **`onModeChange()` is authoritative.** A narrow phone viewport and a PiP window are
+  not the same fact, and only the bridge can tell them apart. Behaviour.
+
+Relying on the event alone means a visible frame or two of full UI at PiP size;
+relying on the media query alone means a narrow phone gets treated as PiP.
 
 ## Contract (proposed, not yet landed)
 
@@ -70,9 +102,13 @@ export interface PipCapability {
   supported(): Promise<boolean>;
 
   /**
-   * Enters PiP. Must be called while the app is still interactive — entering from
-   * an already-backgrounded Activity throws on the native side. To survive the user
-   * pressing home, pre-arm with setParams({ autoEnter: true }) instead.
+   * Enters PiP. If an element is currently fullscreen, the window contains just that
+   * element; otherwise it contains the whole document and the page must re-lay-out.
+   * Call video.requestFullscreen() first for the former.
+   *
+   * Must be called while the app is still interactive — entering from an already
+   * backgrounded Activity throws on the native side. To survive the user pressing
+   * home, pre-arm with setParams({ autoEnter: true }) instead.
    */
   enter(options?: PipOptions): Promise<void>;
 
@@ -91,7 +127,11 @@ export interface PipCapability {
 export interface PipOptions {
   /** Constrained by Android to between 1:2.39 and 2.39:1. */
   aspectRatio?: { width: number; height: number };
-  /** CSS-pixel rect of the element being PiP'd, for the enter animation. */
+  /**
+   * CSS-pixel rect of the element being PiP'd, for the enter animation. Only needed
+   * on the non-fullscreen path — with a fullscreen custom view attached, native
+   * already knows its bounds and computes the hint itself.
+   */
   sourceRect?: { x: number; y: number; width: number; height: number };
   /** API 31+. Ignored below it — see "API-level reality". */
   autoEnter?: boolean;
@@ -138,6 +178,10 @@ One more host-side trap: an app that calls `webView.onPause()` from
 `Activity.onPause()` — common, and correct without PiP — will **freeze the video the
 instant PiP starts**, because entering PiP pauses the Activity while leaving it
 visible. Gate that call on `isInPictureInPictureMode`.
+
+Everything *else* is Permetic's job, not the host's: the `WebChromeClient`, attaching
+and detaching the custom view, and calling `enterPictureInPictureMode`. The host
+declares the manifest attributes and stays out of it.
 
 ## API-level reality
 
@@ -188,11 +232,13 @@ has to come back across the bridge as an `onAction` event.
   content into a system surface. `PipAction['kind']` maps to drawables bundled in
   `permetic`. See D-1.
 
-`sourceRect` also needs care: JS measures in CSS pixels via
+`sourceRect` needs care on the non-fullscreen path only: JS measures in CSS pixels via
 `getBoundingClientRect()`, and Android wants device pixels relative to the window, so
-the capability has to scale by the WebView's current factor and offset by its
-position on screen. Getting it wrong degrades the enter animation without failing, so
-it will rot unnoticed unless it is checked on a device.
+the capability has to scale by the WebView's current factor and offset by its position
+on screen. Getting it wrong degrades the enter animation without failing anything, so
+it rots unnoticed unless checked on a device. On the fullscreen path the custom view's
+own bounds are the hint and none of this arises — one more reason to treat fullscreen
+as the primary route.
 
 ## Interaction with spec 01
 
@@ -203,7 +249,12 @@ it will rot unnoticed unless it is checked on a device.
   not yet measured.
 - **Activity binding.** `enterPictureInPictureMode` needs the Activity, so this
   capability follows the existing rule: `UNAVAILABLE` when the weak reference is gone,
-  never a throw.
+  never a throw. The custom view is attached to that Activity's content view, so it is
+  bound to the same lifetime and must be detached in `onDestroy()`.
+- **`attach()` currently sets only a `WebViewClient`.** Adding a `WebChromeClient`
+  there is the concrete change task 12 starts with. It is also where any future
+  file-chooser and permission-prompt handling lands (task 11), so the two tasks touch
+  the same seam and should agree on who owns it.
 - **Navigation policy (task 11).** Opening an external link from a PiP window would
   yank the user out of the window they just chose. Task 11 should suppress
   `system.openUrl` while in PiP, or the hardening pass should record why not.
@@ -214,11 +265,16 @@ it will rot unnoticed unless it is checked on a device.
 rect conversion, action-list truncation, and the manifest/API-level gating, all of
 which are ordinary functions and should not need a device.
 
-Instrumented, on a real device or emulator: entering PiP from the fixture page,
-`onModeChange` firing on both transitions, and the WebView still rendering afterwards.
-A manual run is still needed for the things a test cannot judge — the enter animation
-with and without `sourceRect`, auto-enter on the home gesture, and a tap on a PiP
-action arriving back in JS.
+Instrumented, on a real device or emulator: `video.requestFullscreen()` from the
+fixture page actually reaching `onShowCustomView` and the custom view being attached
+(that is the prerequisite, and it is testable on its own before any PiP exists);
+entering PiP from there; `onModeChange` firing on both transitions; and the WebView
+still rendering afterwards.
+
+A manual run is still needed for what a test cannot judge — that the PiP window
+contains **only the video** rather than the shrunken page, the enter animation with
+and without `sourceRect`, auto-enter on the home gesture, and a tap on a PiP action
+arriving back in JS.
 
 The negative case matters as much: an Activity **without** `configChanges` declared
 should be detected and reported, not left to fail as a mysterious page reload.
@@ -244,3 +300,8 @@ should be detected and reported, not left to fail as a mysterious page reload.
 - **D-5** Does `pip` belong in `permetic-core` or its own optional module? It carries
   no heavy dependency the way push and billing do, which argues for core — but it does
   impose manifest requirements on every host, which argues against.
+- **D-6** Does fullscreen handling ship as part of task 12, or ahead of it as its own
+  change? HTML5 fullscreen video is broken in Permetic today with or without PiP, so
+  fixing it stands on its own merits and is far easier to verify in isolation. Bundling
+  it into task 12 means the first thing that exercises it is also the most complicated
+  thing that could go wrong. Leaning toward splitting it out.

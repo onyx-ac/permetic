@@ -370,10 +370,13 @@ Do these in order, one per review cycle.
     browser), file chooser, runtime permission mapping, back handling, CSP for the
     bundled assets.
 
-12. **`pip`.** Picture-in-Picture. Adds a `pip` capability, since Android WebView
-    does not implement the Web Picture-in-Picture API at all — Activity PiP is the
-    only mechanism, and it shrinks the whole WebView, so this is a mode the web app
-    has to re-lay-out for rather than a fire-and-forget call. Designed in **spec 07**,
+12. **`pip`.** Picture-in-Picture. Adds a `pip` capability, since Android WebView does
+    not implement the Web Picture-in-Picture API at all — Activity PiP is the only
+    mechanism. Starts with a `WebChromeClient`: `onShowCustomView` hands over a native
+    view holding just the fullscreened `<video>`, and PiP'ing *that* is what puts the
+    video alone in the window instead of the whole shrunken page. Permetic sets no
+    `WebChromeClient` today, so HTML5 fullscreen video is broken here regardless of
+    PiP — likely worth fixing as its own change first. Designed in **spec 07**,
     including the manifest attributes the embedding app must declare (getting
     `configChanges` wrong reloads the page mid-video). Independent of tasks 7–11 and
     can proceed in parallel from task 6 onward.
