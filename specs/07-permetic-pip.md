@@ -88,6 +88,59 @@ keyboard. In the fallback path it carries layout too, and there the split matter
 Relying on the event alone means a visible frame or two of full UI at PiP size;
 relying on the media query alone means a narrow phone gets treated as PiP.
 
+## Measured: JavaScript keeps running in PiP
+
+ADR 0011 raises the question this spec turns on for the tracker case, and it is not a
+detail there. A `<video>` decodes in the media pipeline with JS nowhere in the
+per-frame loop, so throttling barely touches it. A **canvas stream has no native
+producer** — every frame is a JS paint, so if timers stop, the PiP window shows a
+frozen clock, which is worse than showing nothing because it looks like it is working.
+
+Measured on the `Medium_Phone_API_36.1` emulator (API 36), 48 seconds of steady-state
+PiP, sampled every 4s, against a 100ms `setInterval` and a `requestAnimationFrame`
+loop both painting a canvas:
+
+| | foreground | in PiP (worst of 12 samples) |
+| --- | --- | --- |
+| `setInterval(100ms)` | 8.3/s | **10.0/s** |
+| `requestAnimationFrame` | 35.3/s | **57.3/s** |
+
+Neither is throttled — both run *faster* in PiP than the foreground baseline, which
+only looks odd until you notice the baseline window included page startup.
+
+The mechanism is the part worth keeping: **`document.visibilityState` stays
+`"visible"` throughout PiP.** Chromium's timer throttling is gated on the page being
+hidden, and in PiP it never is. That is why nothing is throttled, and it is a much
+better thing to rely on than a measured rate.
+
+Two consequences for ADR 0011:
+
+- **Canvas-streamed PiP is viable on Android.** The escalation path it describes —
+  `OffscreenCanvas` in a Worker — is not needed.
+- **The move off `requestAnimationFrame` onto an interval was not necessary here.**
+  rAF keeps running at ~58/s. It is harmless to keep, and still right for a hidden
+  page, but on this path it buys nothing.
+
+Reproduce with `PipProbeActivity` in the `androidTest` source set:
+
+```
+./gradlew :permetic:assembleDebugAndroidTest
+adb install -r -t packages/permetic/build/outputs/apk/androidTest/debug/permetic-debug-androidTest.apk
+adb shell am start -n ac.onyx.permetic.test/ac.onyx.permetic.pip.PipProbeActivity
+adb logcat -d -s PipProbe:I
+```
+
+Two caveats, both real. This is an **emulator**, so it answers "does AOSP WebView do
+this" — an OEM build could differ, and a real-device run is the confirmation. And it
+measures the WebView *visible in the PiP window*; once fullscreen handling exists, the
+custom-view path needs measuring again, because there the WebView is covered by the
+video view and may not stay `visible`.
+
+It also could not be driven from `ActivityScenario`: under instrumentation the activity
+never gained window focus and the system refused PiP ten times out of ten. Launched
+normally it enters first try. Worth knowing before anyone tries to make this a
+conventional instrumented test.
+
 ## Contract (proposed, not yet landed)
 
 `pip` is a new `CapabilityName`, so landing this is a contract change, with the full
@@ -95,6 +148,9 @@ drift dance spec 01 task 1 set up: edit `packages/permetic-web/src/index.d.ts` a
 `packages/permetic-web/contract/manifest.json`, mirror the interface in
 `capability/`, and add the `CapabilityName` entry — at which point `Dispatcher`'s
 `when` stops compiling until its arm exists, which is the point.
+
+Three members. ADR 0011 asked for exactly these and explicitly did not want the rest;
+nothing else has a consumer, so nothing else ships.
 
 ```ts
 export interface PipCapability {
@@ -106,49 +162,35 @@ export interface PipCapability {
    * element; otherwise it contains the whole document and the page must re-lay-out.
    * Call video.requestFullscreen() first for the former.
    *
-   * Must be called while the app is still interactive — entering from an already
-   * backgrounded Activity throws on the native side. To survive the user pressing
-   * home, pre-arm with setParams({ autoEnter: true }) instead.
+   * Must be called while the app is still interactive — the system refuses PiP from
+   * an Activity that is not visible and focused.
    */
   enter(options?: PipOptions): Promise<void>;
 
-  /**
-   * Updates aspect ratio, actions or auto-enter. Valid both while in PiP and,
-   * importantly, before it — this is how autoEnter gets armed.
-   */
-  setParams(options: PipOptions): Promise<void>;
-
   onModeChange(listener: (inPip: boolean) => void): Unsubscribe;
-
-  /** A button in the PiP window was tapped; the payload is PipAction['id']. */
-  onAction(listener: (actionId: string) => void): Unsubscribe;
 }
 
 export interface PipOptions {
   /** Constrained by Android to between 1:2.39 and 2.39:1. */
   aspectRatio?: { width: number; height: number };
-  /**
-   * CSS-pixel rect of the element being PiP'd, for the enter animation. Only needed
-   * on the non-fullscreen path — with a fullscreen custom view attached, native
-   * already knows its bounds and computes the hint itself.
-   */
-  sourceRect?: { x: number; y: number; width: number; height: number };
-  /** API 31+. Ignored below it — see "API-level reality". */
-  autoEnter?: boolean;
-  actions?: readonly PipAction[];
-}
-
-export interface PipAction {
-  id: string;
-  /** A closed set, not an arbitrary icon. See D-1. */
-  kind: 'play' | 'pause' | 'next' | 'previous' | 'replay';
-  label: string;
-  enabled?: boolean;
 }
 ```
 
-`onModeChange`/`onAction` are ordinary `onXxx` subscriptions and cancel through the
-reserved `"unsubscribe"` wire method established in spec 01 task 4.
+`onModeChange` is an ordinary `onXxx` subscription and cancels through the reserved
+`"unsubscribe"` wire method established in spec 01 task 4.
+
+### Deferred, with the analysis kept
+
+Not cut because they are bad ideas — cut because nothing needs them, and each carries
+a cost worth not paying twice.
+
+| Deferred | Why it can wait |
+| --- | --- |
+| **PiP actions** (`RemoteAction`, `PendingIntent`) | Tokido's controls live in a notification, which is a better surface for pause/stop anyway. Skipping them also skips the `PendingIntent` immutability requirement and the "arbitrary content in a system surface" icon problem entirely. Closes **D-1**. |
+| **`MediaSession` integration** | Only worth it alongside actions, and it is a much larger integration whose payoff (lock-screen and headset controls) nothing is asking for. Closes **D-2**. |
+| **`autoEnter` / `onUserLeaveHint`** | The user toggles the flyout explicitly, so the API 26–30 gesture-navigation unreliability never arises and no half-working fallback has to ship. Closes **D-4**. |
+| **`sourceRect`** | Only needed on the non-fullscreen path. Removes the CSS→device-pixel conversion this spec flagged as the kind that "rots unnoticed". |
+| **`setParams()`** | Existed to arm `autoEnter` and update actions. With both gone it has no job. |
 
 ## What the embedding app must do
 
@@ -174,10 +216,11 @@ The capability can detect a misconfigured host rather than failing mysteriously:
 `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE` exposes the first attribute. Both
 should be checked at registration and reported loudly.
 
-One more host-side trap: an app that calls `webView.onPause()` from
-`Activity.onPause()` — common, and correct without PiP — will **freeze the video the
-instant PiP starts**, because entering PiP pauses the Activity while leaving it
-visible. Gate that call on `isInPictureInPictureMode`.
+One more host-side rule, and for a canvas-streamed surface it is fatal rather than
+merely ugly: an app that calls `webView.onPause()` from `Activity.onPause()` — common,
+and correct without PiP — **freezes frame production the instant PiP starts**, because
+entering PiP pauses the Activity while leaving it visible. Everything measured above
+depends on this call not happening. Gate it on `isInPictureInPictureMode`.
 
 Everything *else* is Permetic's job, not the host's: the `WebChromeClient`, attaching
 and detaching the custom view, and calling `enterPictureInPictureMode`. The host
@@ -217,36 +260,33 @@ So `enter()` must still be able to fail after `supported()` said yes. Map the us
 own refusal to `PERMISSION_DENIED`, not `UNAVAILABLE` — it is a permission, and the
 web app may reasonably want to say so.
 
-## Actions, and the two things that must not be got wrong
+## If actions are ever revived
 
-PiP windows take up to `Activity.getMaxNumPictureInPictureActions()` buttons
-(three in practice). Each is a `RemoteAction` wrapping a `PendingIntent`, and a tap
-has to come back across the bridge as an `onAction` event.
+Recorded so the analysis is not redone from scratch. PiP windows take up to
+`Activity.getMaxNumPictureInPictureActions()` buttons (three in practice), each a
+`RemoteAction` wrapping a `PendingIntent`, with taps coming back over the bridge.
 
-- **The `PendingIntent` must be immutable and explicit**, targeting a receiver in
-  the app that is not exported. Mutable or implicit, it becomes a way for another app
-  to drive the web app's playback controls. `FLAG_IMMUTABLE` is mandatory from API 31
-  anyway; treat it as mandatory everywhere.
-- **Icons are a closed set, not web-app-supplied bitmaps.** The web app cannot ship
-  an Android drawable, and letting it hand over arbitrary images puts attacker-shaped
-  content into a system surface. `PipAction['kind']` maps to drawables bundled in
-  `permetic`. See D-1.
+- **The `PendingIntent` must be immutable and explicit**, targeting a non-exported
+  receiver. Mutable or implicit, it is a way for another app to drive the web app's
+  controls. `FLAG_IMMUTABLE` is mandatory from API 31 anyway; treat it as mandatory
+  everywhere.
+- **Icons must be a closed set, not web-app-supplied bitmaps.** The page cannot ship an
+  Android drawable, and accepting arbitrary images puts page-controlled content into a
+  system surface.
 
-`sourceRect` needs care on the non-fullscreen path only: JS measures in CSS pixels via
-`getBoundingClientRect()`, and Android wants device pixels relative to the window, so
-the capability has to scale by the WebView's current factor and offset by its position
-on screen. Getting it wrong degrades the enter animation without failing anything, so
-it rots unnoticed unless checked on a device. On the fullscreen path the custom view's
-own bounds are the hint and none of this arises — one more reason to treat fullscreen
-as the primary route.
+Likewise `sourceRect`, if the non-fullscreen path ever needs a good animation: JS
+measures in CSS pixels, Android wants device pixels relative to the window, so it has
+to be scaled by the WebView's factor and offset by its on-screen position. It degrades
+the animation without failing anything, so it rots unnoticed unless checked on a
+device.
 
 ## Interaction with spec 01
 
 - **Lifecycle.** PiP does not cross the foreground/background boundary: the Activity
-  is paused but stays visible and started, so `system.onLifecycle()` is expected to
-  keep reporting `foreground`. That is why PiP needs its own signal. **Verify this on
-  a device before relying on it** — it is asserted here from the documented lifecycle,
-  not yet measured.
+  is paused but stays visible and started, so `system.onLifecycle()` keeps reporting
+  `foreground`. Measured, not assumed — see above, where the page also stays
+  `document.visibilityState === "visible"`. That is exactly why PiP needs its own
+  signal: nothing in the existing lifecycle contract changes when it starts.
 - **Activity binding.** `enterPictureInPictureMode` needs the Activity, so this
   capability follows the existing rule: `UNAVAILABLE` when the weak reference is gone,
   never a throw. The custom view is attached to that Activity's content view, so it is
@@ -258,6 +298,25 @@ as the primary route.
 - **Navigation policy (task 11).** Opening an external link from a PiP window would
   yank the user out of the window they just chose. Task 11 should suppress
   `system.openUrl` while in PiP, or the hardening pass should record why not.
+
+## Can `onModeChange` say who ended PiP?
+
+ADR 0011 asks, because on the web it treats dismissing the PiP window as "pause the
+activity", and that rule cannot cross unchanged: on Android the *system* can reclaim a
+window — another app pops one out, or memory pressure — and pausing somebody's tracked
+time because of that would be indefensible.
+
+The short answer is **no, not the distinction that matters**, and it is worth being
+precise about why. Android reports *that* the mode changed, never why. Two of the three
+cases can be separated with effort: on `onPictureInPictureModeChanged(false, …)` the
+Activity resuming means the user expanded it back, while the Activity stopping means
+the window went away. But **"the user closed it" and "the system reclaimed it" both
+look like the second case**, and that is exactly the pair the pause rule turns on.
+
+So ADR 0011's plan is the right one: Android keeps its own semantics and the
+notification stays the source of truth. `onModeChange` carries a boolean and nothing
+else. Anything richer would be a guess dressed as a fact, and the failure mode is
+silently pausing time a user is still tracking.
 
 ## Verification
 
@@ -271,32 +330,32 @@ fixture page actually reaching `onShowCustomView` and the custom view being atta
 entering PiP from there; `onModeChange` firing on both transitions; and the WebView
 still rendering afterwards.
 
-A manual run is still needed for what a test cannot judge — that the PiP window
-contains **only the video** rather than the shrunken page, the enter animation with
-and without `sourceRect`, auto-enter on the home gesture, and a tap on a PiP action
-arriving back in JS.
+A manual run is still needed for what a test cannot judge — chiefly that the PiP window
+contains **only the video** rather than the shrunken page.
+
+And re-run `PipProbeActivity` **on a real device**, and again once fullscreen handling
+exists: the numbers above were taken on an emulator, with the WebView itself in the PiP
+window. Under the custom-view path the WebView is covered by the video view, and
+whether the page stays `visible` there is the same question all over again with a
+different answer possible.
 
 The negative case matters as much: an Activity **without** `configChanges` declared
 should be detected and reported, not left to fail as a mysterious page reload.
 
 ## Open decisions
 
-- **D-1** Action icons: the closed `kind` enum proposed above, or web-app-supplied
-  images? The enum covers essentially every real media case and keeps arbitrary
-  content out of a system surface; images would only matter for non-media PiP.
-- **D-2** Do actions stay an explicit list, or get derived from a native
-  `MediaSession` fed by the page's `navigator.mediaSession` metadata? The latter
-  would also buy lock-screen and headset controls for free, but it is a much larger
-  integration and it is not established how much of `navigator.mediaSession` WebView
-  actually propagates. Worth measuring before choosing.
+- **D-1** ~~Action icons: closed enum or web-app-supplied images?~~ **Closed
+  (2026-08-25)**: PiP actions are deferred entirely — ADR 0011's controls live in a
+  notification. Revisit only with a consumer.
+- **D-2** ~~Explicit action list, or derived from a native `MediaSession`?~~ **Closed
+  (2026-08-25)**: moot while actions are deferred.
 - **D-3** Should `available('pip')` stay purely "registered" (with the host app
   registering conditionally), or become the first capability whose availability is
   computed? Changing it is a contract-semantics change affecting every capability, so
-  the bar is high.
-- **D-4** Below API 31, implement the `onUserLeaveHint()` auto-enter fallback despite
-  it being unreliable under gesture navigation, or declare auto-enter an API 31+
-  feature and let 26–30 have explicit `enter()` only? Shipping a feature that works
-  perhaps half the time is arguably worse than not shipping it.
+  the bar is high. **Still open** — `supported()` sidesteps it for now.
+- **D-4** ~~Implement the `onUserLeaveHint()` auto-enter fallback below API 31?~~
+  **Closed (2026-08-25)**: auto-enter is deferred; the flyout is toggled explicitly, so
+  the unreliable path never has to ship.
 - **D-5** Does `pip` belong in `permetic-core` or its own optional module? It carries
   no heavy dependency the way push and billing do, which argues for core — but it does
   impose manifest requirements on every host, which argues against.
