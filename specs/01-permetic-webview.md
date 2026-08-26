@@ -302,6 +302,17 @@ Do these in order, one per review cycle.
    with nothing faked on either side. `GoogleTokenProvider` itself has **no automated
    test**: it needs a signed-in Google account and a real `serverClientId`, so it
    needs a manual device run before it can be called verified.
+
+   **Superseded in part (2026-08-26) by spec 08.** ADR 0009 arrived after this was
+   built and reverses its central design decision: the capability must be **stateless**,
+   so `CachingAuthCapability`'s cache, single-flight and `refresh()` path go, and the
+   `getToken(scopes, interactive)` surface is replaced by separate `signIn()` and
+   `authorize(scopes)` members — identity and authorization must be asked for
+   incrementally, not bundled. The `system` half of this task is unaffected, as is
+   `GoogleTokenProvider`'s Credential Manager call and the `:permetic-auth-google`
+   module split. See spec 08's "Reconciling with task 6" for the artifact-by-artifact
+   list. The branch is unmerged, so whether to rework before merging or land and revise
+   is still open.
 7. **`permetic-push`.** FCM token, `POST_NOTIFICATIONS` on API 33+, foreground
    message delivery, cold-start tap payload consumed exactly once.
 8. **`permetic-billing`.** Play Billing 7, Activity-scoped, purchase / acknowledge

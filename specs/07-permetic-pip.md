@@ -349,10 +349,11 @@ should be detected and reported, not left to fail as a mysterious page reload.
   notification. Revisit only with a consumer.
 - **D-2** ~~Explicit action list, or derived from a native `MediaSession`?~~ **Closed
   (2026-08-25)**: moot while actions are deferred.
-- **D-3** Should `available('pip')` stay purely "registered" (with the host app
-  registering conditionally), or become the first capability whose availability is
-  computed? Changing it is a contract-semantics change affecting every capability, so
-  the bar is high. **Still open** — `supported()` sidesteps it for now.
+- **D-3** ~~Should `available('pip')` stay purely "registered", or become the first
+  capability whose availability is computed?~~ **Resolved (2026-08-26) in spec 08**,
+  which had the same question for `auth` and settles it for both: `available()` keeps
+  meaning *registered*, and any capability with conditional device support carries its
+  own `supported()` member.
 - **D-4** ~~Implement the `onUserLeaveHint()` auto-enter fallback below API 31?~~
   **Closed (2026-08-25)**: auto-enter is deferred; the flyout is toggled explicitly, so
   the unreliable path never has to ship.
