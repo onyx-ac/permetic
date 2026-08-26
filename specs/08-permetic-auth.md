@@ -50,7 +50,7 @@ cannot, and it is a single native call returning a single string. `authorize` /
 `authorizeOffline` / `grantedScopes` follow when Drive or Calendar are actually being
 built.
 
-## Contract (proposed — replaces the frozen `AuthCapability`)
+## Contract (landed 2026-08-26 — replaced the previously frozen `AuthCapability`)
 
 ```ts
 export interface AuthCapability {
@@ -83,6 +83,13 @@ export interface AuthCapability {
   revoke(scopes?: readonly string[]): Promise<void>;
   signOut(): Promise<void>;
   account(): Promise<{ id: string; email?: string } | null>;
+
+  /**
+   * The signed-in Google account changed. Kept (D-6) because the changes the page
+   * does not cause are the ones it cannot otherwise see: an account removed on the
+   * device, or access revoked at myaccount.google.com.
+   */
+  onAccountChange(listener: (id: string | null) => void): Unsubscribe;
 }
 
 export interface AuthorizationResult {
@@ -102,8 +109,9 @@ it is materially better consent: one refusal costs one feature rather than the a
 and the app learns *which* was refused — which is why `grantedScopes` is on the result
 and not just a separate query.
 
-The frozen contract's `getToken(scopes, interactive)` cannot express this. It conflates
-identity with authorization, so the first call either over-asks or cannot ask at all.
+The `getToken(scopes, interactive)` surface this replaced could not express it: it
+conflates identity with authorization, so a first call either over-asks or cannot ask
+at all.
 
 ## The one rule that belongs in the contract
 
@@ -141,9 +149,9 @@ returned 401". Under this contract:
 - **`refresh()` has no counterpart.** Expiry is the page's and the service's to handle;
   when a token dies the page calls again.
 
-What survives from task 6 is the part that was about *Google*, not about caching:
-`GoogleTokenProvider`'s Credential Manager call, the `:permetic-auth-google` module
-keeping Play Services out of core, and the decision not to parse the JWT. See
+What survived from task 6 is the part that was about *Google* rather than about caching:
+the Credential Manager call (now `GoogleAuthCapability`), the `:permetic-auth-google`
+module keeping Play Services out of core, and the decision not to parse the JWT. See
 "Reconciling with task 6" for the concrete list.
 
 ## Cancellation is a result
@@ -154,8 +162,10 @@ swallows a normal interaction, and surfacing it as `PERMISSION_DENIED` actively 
 about what happened.
 
 `signIn()`, `authorize()` and `authorizeOffline()` therefore resolve to **null** on
-dismissal. Task 6 maps it to `BridgeErrorCode.CANCELLED`, which is better than
-`PERMISSION_DENIED` but still an error; that changes.
+dismissal. Task 6 had mapped it to `BridgeErrorCode.CANCELLED` — better than
+`PERMISSION_DENIED`, but still an error. A dispatcher test now pins the null result,
+because this is the rule most likely to be quietly reverted by someone tidying up
+error handling.
 
 ## `supported()` is not `available()`
 
@@ -197,28 +207,46 @@ add one, which it cannot do for a deliberate refusal.
 
 ## Reconciling with task 6
 
-Task 6 is on `feat/permetic-system-auth` and **not merged**. Concretely:
+**Done (2026-08-26).** Task 6 was reworked to this contract before merging, rather than
+landed and revised, so `main` never carried the caching design. What became of each
+piece:
 
-| Task 6 artifact | Fate |
+| Task 6 artifact | Outcome |
 | --- | --- |
-| `CachingAuthCapability` (cache, single-flight, epoch, `refresh`) | **Delete.** Contradicts "Stateless on purpose". |
-| `TokenProvider` SPI | **Reshape** to the members above; the split that keeps core GMS-free is still right. |
-| `GoogleTokenProvider` Credential Manager call | **Keep.** This is the sign-in, and it already returns an ID token. |
-| `:permetic-auth-google` as a separate module | **Keep.** It is what makes `supported() === false` a real answer on non-GMS builds. |
-| Cancellation → `CANCELLED` | **Change** to a null result. |
-| Non-empty scopes → `UNAVAILABLE` | **Becomes** `authorize()` / `authorizeOffline()`, when Drive or Calendar are built. |
-| Not parsing the JWT for expiry | **Keep**, and it gets easier: no cache means no expiry bookkeeping at all. |
+| `CachingAuthCapability` (cache, single-flight, epoch, `refresh`) | **Deleted**, with its test. Contradicted "Stateless on purpose". |
+| `TokenProvider` SPI | **Deleted** rather than reshaped — see below. |
+| `GoogleTokenProvider` Credential Manager call | **Kept**, as `GoogleAuthCapability`. Already returned an ID token. |
+| `:permetic-auth-google` as a separate module | **Kept.** It is what makes `supported() === false` a real answer on non-GMS builds. |
+| Cancellation → `CANCELLED` | **Changed** to a null result, pinned by a dispatcher test. |
+| Non-empty scopes → `UNAVAILABLE` | **Became** `authorize()` / `authorizeOffline()`, which answer `UNAVAILABLE` until Drive or Calendar are built. |
+| Not parsing the JWT for expiry | **Kept**, and it got easier: no cache means no expiry bookkeeping at all. |
 | `CapabilityException`, `Dispatcher` hardening, `AndroidSystemCapability` | **Unaffected.** |
 
-Whether to rework the branch before merging or land it and revise is a call worth making
-explicitly, not by default.
+One thing this spec expected to reshape turned out to be deletable instead. The
+`TokenProvider` SPI existed to separate caching (core) from identity (module); with the
+caching gone there was nothing for a middle layer to do, so `GoogleAuthCapability`
+implements `AuthCapability` directly and the indirection is gone. Statelessness paid for
+itself immediately.
+
+A second finding worth recording, because it was a test passing for the wrong reason:
+`DispatcherTest`'s "missing required argument" case called `getToken`, which no longer
+exists — so it was really exercising the unknown-method path and would have passed
+whatever argument decoding did. It now calls `authorize`, which genuinely requires its
+argument.
+
+Verified on the merged `main`: 97 JVM tests, 21 TS tests, `tsc --noEmit`, ktlint and
+detekt all clean, both modules assembling. The contract parity tests are the load-bearing
+ones here — they are what confirm `index.d.ts`, `manifest.json`, the Kotlin mirror and
+the dispatcher all moved together.
 
 ## Contract versioning
 
-This changes `AuthCapability`'s surface incompatibly. `CONTRACT_VERSION` is 1 and nothing
-has shipped against it, so amending in place is honest and cheaper than carrying a
-compatibility shim for zero consumers. Once Tokido ships, the OTA contract check (spec 01
-task 10) makes this a real bump.
+This changed `AuthCapability`'s surface incompatibly. `CONTRACT_VERSION` stayed at 1 and
+the contract was amended in place (2026-08-26): nothing had shipped against it, so a
+compatibility shim would have been carried for zero consumers. **Once Tokido ships, that
+stops being true** — the OTA contract check (spec 01 task 10) refuses to activate a
+bundle whose `contractVersion` disagrees with the installed native side, so the next
+incompatible change to any capability is a real bump rather than an edit.
 
 ## Interaction with spec 01
 
@@ -262,9 +290,18 @@ false there rather than failing at the first call.
   Google API scopes simply never calls `authorize`.
 - **D-5** ~~Error taxonomy.~~ **Resolved (2026-08-26)**: see the table above — existing
   codes plus `BridgeError.details.reason`, and dismissal is not an error at all.
-- **D-6** Drop `onAccountChange` from the contract, or keep it? Dropping is coherent with
-  statelessness; keeping costs nothing and it is already implemented. This is the only
-  contract *removal* proposed here, so it should be decided deliberately.
+- **D-6** ~~Drop `onAccountChange` from the contract, or keep it?~~ **Resolved
+  (2026-08-26): keep.** The argument for dropping it — that a stateless capability can
+  only report changes the page itself caused — turns out to be too quick. The account
+  can also change with the page doing nothing: removed on the device, or revoked at
+  myaccount.google.com. Native can observe those and the page cannot, which is precisely
+  what the bridge is for. And emitting "the account changed" is a notification, not the
+  cached credential state statelessness rules out.
+  **Follow-up:** `GoogleAuthCapability` currently only emits on changes it made itself.
+  Covering device-level removal needs an `AccountManager` listener and a decision about
+  `GET_ACCOUNTS`; until then those changes surface as a failure on the next call rather
+  than as an event. This is the gap that most makes the member worth having, so it should
+  not sit indefinitely.
 - **D-7** Should `signIn()` offer a silent variant for app restart — Credential Manager's
   `setFilterByAuthorizedAccounts(true)` — or does the page always re-authenticate through
   its own Firebase session? The latter is simpler and probably right, since a Firebase

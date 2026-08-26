@@ -294,25 +294,27 @@ Do these in order, one per review cycle.
    when the `Activity` is gone rather than returning `UNAVAILABLE` as this doc's
    lifecycle rule says: the call genuinely succeeds that way, and refusing something
    that would have worked is the worse contract. `rebind(activity)` re-points both
-   `AndroidSystemCapability` and `GoogleTokenProvider` after a configuration change.
+   `AndroidSystemCapability` and the Google auth capability after a configuration
+   change.
 
    Verified on a real device: 83 JVM unit tests, and 6 instrumented tests on the
    booted `Medium_Phone_API_36.1` emulator — including the real capability answering
    the real `window.permetic` global end to end through the existing fixture page,
-   with nothing faked on either side. `GoogleTokenProvider` itself has **no automated
-   test**: it needs a signed-in Google account and a real `serverClientId`, so it
-   needs a manual device run before it can be called verified.
+   with nothing faked on either side. The Google auth capability itself still has **no
+   automated test**: it needs a signed-in Google account and a real `serverClientId`,
+   so it needs a manual device run before it can be called verified. That remains true
+   after the spec 08 rework below.
 
-   **Superseded in part (2026-08-26) by spec 08.** ADR 0009 arrived after this was
-   built and reverses its central design decision: the capability must be **stateless**,
-   so `CachingAuthCapability`'s cache, single-flight and `refresh()` path go, and the
-   `getToken(scopes, interactive)` surface is replaced by separate `signIn()` and
-   `authorize(scopes)` members — identity and authorization must be asked for
-   incrementally, not bundled. The `system` half of this task is unaffected, as is
-   `GoogleTokenProvider`'s Credential Manager call and the `:permetic-auth-google`
-   module split. See spec 08's "Reconciling with task 6" for the artifact-by-artifact
-   list. The branch is unmerged, so whether to rework before merging or land and revise
-   is still open.
+   **Superseded in part (2026-08-26) by spec 08, and reworked before merging.** ADR
+   0009 arrived after this was built and reversed its central design decision: the
+   capability is **stateless**, so `CachingAuthCapability`'s cache, single-flight and
+   `refresh()` path were deleted, and `getToken(scopes, interactive)` gave way to
+   separate `signIn()` and `authorize(scopes)` members — identity and authorization are
+   asked for incrementally, not bundled. The rework happened on the branch rather than
+   as a follow-up, so `main` never carried the caching design. The `system` half of this
+   task is unaffected, as are the Credential Manager call (now `GoogleAuthCapability`)
+   and the `:permetic-auth-google` module split. Spec 08's "Reconciling with task 6"
+   has the artifact-by-artifact outcome.
 7. **`permetic-push`.** FCM token, `POST_NOTIFICATIONS` on API 33+, foreground
    message delivery, cold-start tap payload consumed exactly once.
 8. **`permetic-billing`.** Play Billing 7, Activity-scoped, purchase / acknowledge
