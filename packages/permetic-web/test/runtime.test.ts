@@ -82,7 +82,7 @@ describe('buildPermetic', () => {
 
   it('permetic.auth still exists and forwards even with nothing registered natively', async () => {
     const fake = createFakeCarrier();
-    fake.rejectWith(byMethod('auth', 'getToken'), {
+    fake.rejectWith(byMethod('auth', 'signIn'), {
       code: 'UNAVAILABLE',
       message: 'no auth capability registered',
     });
@@ -91,8 +91,8 @@ describe('buildPermetic', () => {
     const permetic = buildPermetic(fake.carrier, noEvents(), 'webview', new Set());
 
     expect(permetic.auth).toBeDefined();
-    await expect(permetic.auth.getToken(['drive'])).rejects.toBeInstanceOf(PermeticError);
-    await expect(permetic.auth.getToken(['drive'])).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    await expect(permetic.auth.signIn()).rejects.toBeInstanceOf(PermeticError);
+    await expect(permetic.auth.signIn()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
   });
 
   it('routes a subscription event to the registered listener and stops after Unsubscribe()', async () => {

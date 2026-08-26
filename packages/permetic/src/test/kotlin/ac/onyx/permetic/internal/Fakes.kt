@@ -3,7 +3,7 @@ package ac.onyx.permetic.internal
 import ac.onyx.permetic.capability.Account
 import ac.onyx.permetic.capability.AppLifecycleState
 import ac.onyx.permetic.capability.AuthCapability
-import ac.onyx.permetic.capability.AuthToken
+import ac.onyx.permetic.capability.AuthorizationResult
 import ac.onyx.permetic.capability.HostKind
 import ac.onyx.permetic.capability.LogLevel
 import ac.onyx.permetic.capability.SharePayload
@@ -43,17 +43,32 @@ internal class FakeSystemCapability(
 }
 
 @Suppress("EmptyFunctionBlock")
-internal class FakeAuthCapability : AuthCapability {
-    override suspend fun getToken(
-        scopes: List<String>,
-        interactive: Boolean,
-    ): AuthToken = AuthToken("tok", 0, scopes)
+internal class FakeAuthCapability(
+    private val idToken: String? = "id-token",
+) : AuthCapability {
+    var signInCalls: Int = 0
+    var lastNonce: String? = null
 
-    override suspend fun refresh(scopes: List<String>): AuthToken = AuthToken("tok2", 0, scopes)
+    override suspend fun supported(): Boolean = true
+
+    override suspend fun signIn(nonce: String?): String? {
+        signInCalls++
+        lastNonce = nonce
+        return idToken
+    }
+
+    override suspend fun authorize(scopes: List<String>): AuthorizationResult? =
+        AuthorizationResult("access-token", expiresAt = null, grantedScopes = scopes)
+
+    override suspend fun authorizeOffline(scopes: List<String>): String? = "server-auth-code"
+
+    override suspend fun grantedScopes(): List<String> = emptyList()
+
+    override suspend fun revoke(scopes: List<String>) {}
 
     override suspend fun signOut() {}
 
-    override suspend fun currentAccount(): Account? = null
+    override suspend fun account(): Account? = null
 
     override fun onAccountChange(): Flow<String?> = emptyFlow()
 }

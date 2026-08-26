@@ -16,7 +16,7 @@ describe('createMockPermetic', () => {
 
     const info = await permetic.system.info();
     expect(info.appVersion).toBe('0.0.0-mock');
-    expect(await permetic.auth.currentAccount()).toBeNull();
+    expect(await permetic.auth.account()).toBeNull();
     expect(await permetic.push?.permissionState()).toBe('prompt');
     expect(await permetic.billing?.queryProducts(['sku'], 'inapp')).toEqual([]);
     expect(await permetic.background?.status('job-1')).toBeNull();
@@ -25,22 +25,31 @@ describe('createMockPermetic', () => {
   it('rejects with a PermeticError for methods that need a real backing implementation', async () => {
     const permetic = createMockPermetic();
 
-    await expect(permetic.auth.getToken(['drive'])).rejects.toBeInstanceOf(PermeticError);
     await expect(permetic.push?.getToken()).rejects.toBeInstanceOf(PermeticError);
     await expect(permetic.billing?.purchase('sku')).rejects.toBeInstanceOf(PermeticError);
+  });
+
+  it('reports auth as unsupported and sign-in as dismissed, rather than throwing', async () => {
+    // With no host there is genuinely no Google provider, and "the user did not sign
+    // in" is the honest answer - it is also the shape every call site already handles,
+    // unlike a thrown error (spec 08).
+    const permetic = createMockPermetic();
+
+    expect(await permetic.auth.supported()).toBe(false);
+    expect(await permetic.auth.signIn()).toBeNull();
+    expect(await permetic.auth.authorize(['drive'])).toBeNull();
   });
 
   it('lets per-method overrides punch through while leaving the rest of the capability alone', async () => {
     const permetic = createMockPermetic({
       auth: {
-        getToken: async () => ({ accessToken: 'fake-token', expiresAt: 0, scopes: ['drive'] }),
+        signIn: async () => 'fake-id-token',
       },
     });
 
-    const token = await permetic.auth.getToken(['drive']);
-    expect(token.accessToken).toBe('fake-token');
+    expect(await permetic.auth.signIn()).toBe('fake-id-token');
     // Untouched methods on the same capability keep their default behavior.
-    expect(await permetic.auth.currentAccount()).toBeNull();
+    expect(await permetic.auth.account()).toBeNull();
   });
 
   it('lets available() be overridden to test the available()===false branch', () => {

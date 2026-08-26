@@ -53,7 +53,10 @@ public class AndroidSystemCapabilityInstrumentedTest {
 
             assertEquals(HostKind.WEBVIEW, info.host)
             assertEquals(Build.VERSION.SDK_INT, info.osVersion)
-            assertTrue("locale should be a real tag, was '${info.locale}'", info.locale.isNotBlank())
+            assertTrue(
+                "locale should be a real tag, was '${info.locale}'",
+                info.locale.isNotBlank(),
+            )
             assertEquals(AppLifecycleState.FOREGROUND, info.lifecycle)
         }
     }

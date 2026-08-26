@@ -1,5 +1,8 @@
 {
-  "auth": ["getToken", "refresh", "signOut", "currentAccount", "onAccountChange"],
+  "auth": [
+    "supported", "signIn", "authorize", "authorizeOffline", "grantedScopes",
+    "revoke", "signOut", "account", "onAccountChange"
+  ],
   "push": ["requestPermission", "permissionState", "getToken", "onToken", "onMessage", "initialMessage"],
   "billing": ["queryProducts", "purchase", "queryPurchases", "acknowledge", "consume", "onPurchaseUpdate"],
   "background": ["schedule", "cancel", "status", "onStatusChange"],

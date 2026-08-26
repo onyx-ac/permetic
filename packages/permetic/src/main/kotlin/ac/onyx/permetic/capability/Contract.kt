@@ -11,10 +11,14 @@ package ac.onyx.permetic.capability
 public object Contract {
     public val AUTH: List<String> =
         listOf(
-            "getToken",
-            "refresh",
+            "supported",
+            "signIn",
+            "authorize",
+            "authorizeOffline",
+            "grantedScopes",
+            "revoke",
             "signOut",
-            "currentAccount",
+            "account",
             "onAccountChange",
         )
 

@@ -113,24 +113,65 @@ declare global {
 /* auth                                                                        */
 /* -------------------------------------------------------------------------- */
 
-export interface AuthToken {
-  accessToken: string;
-  /** Epoch millis. */
-  expiresAt: number;
-  scopes: readonly string[];
+/**
+ * See spec 08. Google refuses OAuth from an embedded WebView by policy
+ * (`disallowed_useragent`), so sign-in happens natively and only the result crosses.
+ *
+ * Deliberately **stateless**: nothing here is cached. A capability that quietly holds
+ * tokens becomes a second source of truth about who is signed in, competing with the
+ * page's own session. Expiry belongs to the page; when a token dies, ask again.
+ *
+ * Identity and authorization are separate on purpose. `signIn` asks for identity and
+ * nothing else; feature scopes are requested by `authorize` when the user switches
+ * that feature on, so one refusal costs one feature rather than the account.
+ */
+export interface AuthCapability {
+  /** Whether this device can do any of this — Play Services is not everywhere. */
+  supported(): Promise<boolean>;
+
+  /**
+   * A Google ID token for Firebase `signInWithCredential`.
+   *
+   * Resolves to **null when the user dismissed the chooser**. That is an outcome, not
+   * an error: dismissal is the most common result after success, and throwing makes
+   * every call site wrap it in a try/catch that swallows a normal interaction.
+   *
+   * `nonce` is optional but recommended — pass a random value and check it comes back
+   * in the token's claims, so a token captured elsewhere cannot be replayed here.
+   */
+  signIn(options?: { nonce?: string }): Promise<string | null>;
+
+  /** Short-lived access token for Google APIs. Null if the user refused. */
+  authorize(scopes: readonly string[]): Promise<AuthorizationResult | null>;
+
+  /**
+   * A one-time server auth code — the only route to a refresh token, exchanged by the
+   * app's own service. There is deliberately no member returning a refresh token: a
+   * credential that lives until revoked must never be inside the WebView.
+   */
+  authorizeOffline(scopes: readonly string[]): Promise<string | null>;
+
+  /** What is actually held right now; people revoke at myaccount.google.com. */
+  grantedScopes(): Promise<readonly string[]>;
+
+  revoke(scopes?: readonly string[]): Promise<void>;
+  signOut(): Promise<void>;
+  account(): Promise<{ id: string; email?: string } | null>;
+
+  /**
+   * The signed-in Google account changed. Worth subscribing to even though the page
+   * initiates most changes: the account can also be removed on the device or revoked
+   * at myaccount.google.com, neither of which the page can observe for itself.
+   */
+  onAccountChange(listener: (id: string | null) => void): Unsubscribe;
 }
 
-export interface AuthCapability {
-  /**
-   * webview:  may show an interactive account picker when interactive is true.
-   * headless: MUST NOT show UI. Rejects UNAUTHENTICATED if no cached token.
-   */
-  getToken(scopes: readonly string[], interactive?: boolean): Promise<AuthToken>;
-  /** Forces a refresh, e.g. after Drive returns 401. */
-  refresh(scopes: readonly string[]): Promise<AuthToken>;
-  signOut(): Promise<void>;
-  currentAccount(): Promise<{ id: string; email?: string } | null>;
-  onAccountChange(listener: (id: string | null) => void): Unsubscribe;
+export interface AuthorizationResult {
+  accessToken: string;
+  /** Epoch millis, or null when the provider does not report one. */
+  expiresAt: number | null;
+  /** What was actually granted — consent can be partial, and the app must learn which. */
+  grantedScopes: readonly string[];
 }
 
 /* -------------------------------------------------------------------------- */

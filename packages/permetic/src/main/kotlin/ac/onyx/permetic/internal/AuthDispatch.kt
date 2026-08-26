@@ -6,6 +6,12 @@ import ac.onyx.permetic.transport.BridgeErrorCode
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 
+/**
+ * Note what is *absent*: nothing here catches a cancellation and turns it into an
+ * error code. `signIn`/`authorize`/`authorizeOffline` return null when the user
+ * dismissed the chooser, and null encodes to JSON null — so dismissal reaches the page
+ * as an ordinary result, per spec 08.
+ */
 internal suspend fun dispatchAuth(
     auth: AuthCapability,
     method: String,
@@ -13,13 +19,20 @@ internal suspend fun dispatchAuth(
     subscriptions: SubscriptionRunner,
 ): JsonElement =
     when (method) {
-        "getToken" -> encodeResult(auth.getToken(args.decode(0), args.decodeOptional(1, false)))
-        "refresh" -> encodeResult(auth.refresh(args.decode(0)))
+        "supported" -> encodeResult(auth.supported())
+        "signIn" -> encodeResult(auth.signIn(args.decodeOptional<String?>(0, null)))
+        "authorize" -> encodeResult(auth.authorize(args.decode(0)))
+        "authorizeOffline" -> encodeResult(auth.authorizeOffline(args.decode(0)))
+        "grantedScopes" -> encodeResult(auth.grantedScopes())
+        "revoke" -> {
+            auth.revoke(args.decodeOptional(0, emptyList()))
+            JsonNull
+        }
         "signOut" -> {
             auth.signOut()
             JsonNull
         }
-        "currentAccount" -> encodeResult(auth.currentAccount())
+        "account" -> encodeResult(auth.account())
         "onAccountChange" ->
             subscriptions.start(CapabilityName.AUTH, auth.onAccountChange()) {
                 encodeResult(it)

@@ -1,7 +1,7 @@
 package ac.onyx.permetic.internal
 
 import ac.onyx.permetic.capability.AppLifecycleState
-import ac.onyx.permetic.capability.AuthToken
+import ac.onyx.permetic.capability.AuthorizationResult
 import ac.onyx.permetic.capability.CapabilityName
 import ac.onyx.permetic.transport.BridgeErrorCode
 import ac.onyx.permetic.transport.BridgeEvent
@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -65,18 +66,50 @@ class DispatcherTest {
                 dispatcher.dispatch(
                     request(
                         CapabilityName.AUTH,
-                        "getToken",
+                        "authorize",
                         listOf(JsonArray(listOf(JsonPrimitive("drive")))),
                     ),
                 )
 
             assertTrue(response is BridgeResponse.Success)
-            val token =
+            val result =
                 kotlinx.serialization.json.Json.decodeFromJsonElement(
-                    AuthToken.serializer(),
+                    AuthorizationResult.serializer(),
                     response.value,
                 )
-            assertEquals("tok", token.accessToken)
+            assertEquals("access-token", result.accessToken)
+            assertEquals(listOf("drive"), result.grantedScopes)
+        }
+
+    /**
+     * Spec 08's rule that is easiest to regress: a dismissed chooser is a null result,
+     * not a `BridgeResponse.Failure`. If this ever flips, every call site in the page
+     * grows a try/catch around a normal interaction.
+     */
+    @Test
+    fun `a dismissed sign-in is a null result, not an error`() =
+        runTest {
+            val registry =
+                CapabilityRegistry().apply { register(FakeAuthCapability(idToken = null)) }
+            val dispatcher = Dispatcher(registry, backgroundScope) {}
+
+            val response = dispatcher.dispatch(request(CapabilityName.AUTH, "signIn"))
+
+            assertTrue(response is BridgeResponse.Success)
+            assertEquals(JsonNull, response.value)
+        }
+
+    @Test
+    fun `signIn forwards an absent nonce as null rather than dropping the argument`() =
+        runTest {
+            val auth = FakeAuthCapability()
+            val registry = CapabilityRegistry().apply { register(auth) }
+            val dispatcher = Dispatcher(registry, backgroundScope) {}
+
+            dispatcher.dispatch(request(CapabilityName.AUTH, "signIn", listOf(JsonNull)))
+
+            assertEquals(1, auth.signInCalls)
+            assertEquals(null, auth.lastNonce)
         }
 
     @Test
@@ -97,7 +130,11 @@ class DispatcherTest {
             val registry = CapabilityRegistry().apply { register(FakeAuthCapability()) }
             val dispatcher = Dispatcher(registry, backgroundScope) {}
 
-            val response = dispatcher.dispatch(request(CapabilityName.AUTH, "getToken"))
+            // `authorize` needs its scopes argument; omitting it must fail decoding
+            // rather than reach the capability. (Using a *known* method matters here —
+            // an unknown one would produce INVALID_ARGUMENT for the wrong reason and
+            // the test would pass without exercising argument decoding at all.)
+            val response = dispatcher.dispatch(request(CapabilityName.AUTH, "authorize"))
 
             assertTrue(response is BridgeResponse.Failure)
             assertEquals(BridgeErrorCode.INVALID_ARGUMENT, response.error.code)

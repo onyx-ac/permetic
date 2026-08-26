@@ -1,6 +1,6 @@
 import type {
   AuthCapability,
-  AuthToken,
+  AuthorizationResult,
   BackgroundCapability,
   BackgroundJobSpec,
   BackgroundJobStatus,
@@ -136,10 +136,16 @@ function buildSystem(carrier: Carrier, subscriptions: SubscriptionMap): SystemCa
 
 function buildAuth(carrier: Carrier, subscriptions: SubscriptionMap): AuthCapability {
   return {
-    getToken: (scopes, interactive = false) => call<AuthToken>(carrier, 'auth', 'getToken', [scopes, interactive]),
-    refresh: (scopes) => call<AuthToken>(carrier, 'auth', 'refresh', [scopes]),
+    supported: () => call<boolean>(carrier, 'auth', 'supported', []),
+    // The contract takes an options object for room to grow; the wire is positional,
+    // so only the nonce crosses.
+    signIn: (options) => call<string | null>(carrier, 'auth', 'signIn', [options?.nonce ?? null]),
+    authorize: (scopes) => call<AuthorizationResult | null>(carrier, 'auth', 'authorize', [scopes]),
+    authorizeOffline: (scopes) => call<string | null>(carrier, 'auth', 'authorizeOffline', [scopes]),
+    grantedScopes: () => call<readonly string[]>(carrier, 'auth', 'grantedScopes', []),
+    revoke: (scopes) => call<void>(carrier, 'auth', 'revoke', [scopes ?? []]),
     signOut: () => call<void>(carrier, 'auth', 'signOut', []),
-    currentAccount: () => call(carrier, 'auth', 'currentAccount', []),
+    account: () => call(carrier, 'auth', 'account', []),
     onAccountChange: (listener) => subscribe(carrier, subscriptions, 'auth', 'onAccountChange', [], listener),
   };
 }

@@ -53,14 +53,17 @@ function defaultSystem(): SystemCapability {
 
 function defaultAuth(): AuthCapability {
   return {
-    getToken: async () => {
-      throw unavailable('auth');
-    },
-    refresh: async () => {
-      throw unavailable('auth');
-    },
+    // The mock exists so the app runs with no host at all, so "supported" is false
+    // and sign-in returns null - the same shape as a user dismissing the chooser,
+    // which every call site already has to handle.
+    supported: async () => false,
+    signIn: async () => null,
+    authorize: async () => null,
+    authorizeOffline: async () => null,
+    grantedScopes: async () => [],
+    revoke: async () => {},
     signOut: async () => {},
-    currentAccount: async () => null,
+    account: async () => null,
     onAccountChange: () => noSubscription(),
   };
 }
