@@ -8,5 +8,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            The three attributes spec 07 requires of a PiP host. configChanges is the
+            load-bearing one: without it the Activity is recreated on the PiP
+            transition, the WebView is torn down, and the page reloads - which for a
+            canvas-streamed tracker destroys the session being watched (ADR 0011).
+        -->
+        <activity
+            android:name="ac.onyx.permetic.pip.PipProbeActivity"
+            android:exported="true"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
     </application>
 </manifest>

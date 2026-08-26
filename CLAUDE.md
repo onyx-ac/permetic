@@ -38,6 +38,12 @@ The JS global is `permetic`.
 - `@specs/05-reference-topology.md` — a worked product example. Not a deliverable;
   read it when a product decision looks like it needs a contract change.
 - `@specs/06-permetic-ota.md` — the OTA publishing CLI. Concept-level.
+- `@specs/07-permetic-pip.md` — Picture-in-Picture. Read before touching `pip`; the
+  WebView has no Web PiP API, so it works differently from how it does in a browser.
+- `@specs/08-permetic-auth.md` — `auth`. Read before touching sign-in: Google refuses
+  OAuth from an embedded WebView, the capability is deliberately stateless, and a
+  refresh token must never cross the bridge. Supersedes the `auth` surface built in
+  spec 01 task 6.
 - `@packages/permetic-web/src/index.d.ts` — the capability contract. Source of truth.
 - `specs/adr/` — decisions already made. If a spec conflicts with an ADR, stop and ask.
 
